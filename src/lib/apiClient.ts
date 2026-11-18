@@ -50,7 +50,7 @@ export function requiresExternalApiUrl(): boolean {
     proto === 'capacitor:' ||
     proto === 'ionic:' ||
     proto === 'app:' ||
-    (isCompiledShell() && window.location.hostname === 'localhost' && !window.location.port);
+    isCompiledShell();
   return isLocalPackagedOrigin && !getApiBaseUrl();
 }
 
