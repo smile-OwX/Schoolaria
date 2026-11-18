@@ -71,8 +71,8 @@ cd android && gradlew.bat assembleDebug
 ```
 Le fichier créé est dans **`android\app\build\outputs\apk\debug\app-debug.apk`**.
 
-### Connexion Google sur Android (`.apk`)
-Dans le dossier `android/`, exécutez `gradlew.bat signingReport`, copiez l'empreinte **SHA-1**, puis ajoutez-la dans **Firebase Console → Paramètres du projet → Vos applications → Android**.
+### Connexion Google native sur Android (`.apk`)
+Lors du premier lancement, `creer-apk.bat` affiche automatiquement votre empreinte **SHA-1** et vous invite à copier `google-services.json` (téléchargé depuis **Firebase Console → Paramètres du projet → Ajouter une application Android `com.schoolaria.app`**) dans `android\app\google-services.json`. Une fois ce fichier en place, la connexion Google utilise le sélecteur natif Android sans passer par Chrome.
 
 ---
 

@@ -24,6 +24,12 @@ const config = {
     contentInset: 'automatic',
     allowsLinkPreview: false,
   },
+  plugins: {
+    FirebaseAuthentication: {
+      skipNativeAuth: true,
+      providers: ['google.com'],
+    },
+  },
 };
 
 export default config;

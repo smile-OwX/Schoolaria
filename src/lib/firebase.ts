@@ -1,3 +1,5 @@
+import { Capacitor } from '@capacitor/core';
+import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { initializeApp } from 'firebase/app';
 import {
   browserLocalPersistence,
@@ -6,6 +8,7 @@ import {
   GoogleAuthProvider,
   indexedDBLocalPersistence,
   setPersistence,
+  signInWithCredential,
   signInWithPopup,
   signInWithRedirect,
   signOut,
@@ -35,6 +38,11 @@ export function isEmbeddedFrame(): boolean {
 
 export function isCapacitorNative(): boolean {
   if (typeof window === 'undefined') return false;
+  try {
+    if (Capacitor.isNativePlatform()) return true;
+  } catch {
+    // Fallback to global/protocol check
+  }
   const win = window as unknown as {
     Capacitor?: { isNativePlatform?: () => boolean; getPlatform?: () => string };
   };
@@ -119,8 +127,16 @@ export async function processAuthRedirectResult(): Promise<UserCredential | null
 
 export function formatFirebaseAuthError(error: unknown): string {
   const errObj = error as { code?: string; message?: string } | null;
-  const code = errObj?.code || '';
+  const code = String(errObj?.code || '');
+  const msg = String(errObj?.message || '');
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
+
+  if (/cancel/i.test(code) || /cancel/i.test(msg) || code === '12501' || code === '16') {
+    return 'Connexion Google annulée avant validation. Réessayez.';
+  }
+  if (/developer_error|10:|default_web_client_id|no credentials available|sha-1/i.test(msg)) {
+    return 'Configuration Android Google Sign-In incomplète : vérifiez que google-services.json et votre empreinte SHA-1 sont bien ajoutés dans Console Firebase pour com.schoolaria.app.';
+  }
 
   switch (code) {
     case 'auth/popup-closed-by-user':
@@ -134,7 +150,7 @@ export function formatFirebaseAuthError(error: unknown): string {
     case 'auth/operation-not-supported-in-this-environment':
       return 'Cet environnement bloque les fenêtres popup : bascule en mode redirection en cours...';
     default:
-      return errObj?.message || 'Échec de la connexion Google.';
+      return msg || 'Échec de la connexion Google.';
   }
 }
 
@@ -222,12 +238,46 @@ export async function testFirestoreConnection(): Promise<boolean> {
   }
 }
 
+function isNativeSignInCancelled(err: unknown): boolean {
+  const errObj = err as { code?: string | number; message?: string } | null;
+  const code = String(errObj?.code ?? '');
+  const msg = String(errObj?.message ?? '');
+  return /cancel/i.test(code) || /cancel/i.test(msg) || code === '12501' || code === '16';
+}
+
 export async function signInWithGoogle() {
-  // Native Capacitor WebViews and local file:// Electron shells often reject popups;
-  // prefer popup in standard web/iframes and fall back automatically to redirect when blocked/unsupported.
+  // Native Capacitor Android/iOS: use native Google Sign-In UI (avoids Chrome redirect loops & WebView 403)
+  if (isCapacitorNative()) {
+    try {
+      let result;
+      try {
+        result = await FirebaseAuthentication.signInWithGoogle();
+      } catch (credMgrErr: unknown) {
+        if (isNativeSignInCancelled(credMgrErr)) {
+          throw credMgrErr;
+        }
+        // Fallback to classic Google Play Services Sign-In Intent on older Android devices
+        result = await FirebaseAuthentication.signInWithGoogle({
+          useCredentialManager: false,
+        });
+      }
+
+      const idToken = result?.credential?.idToken;
+      if (!idToken) {
+        throw new Error(
+          'Jeton Google (idToken) introuvable. Vérifiez google-services.json et votre SHA-1 dans Firebase Console.'
+        );
+      }
+      const credential = GoogleAuthProvider.credential(idToken);
+      return await signInWithCredential(auth, credential);
+    } catch (err: unknown) {
+      throw new Error(formatFirebaseAuthError(err));
+    }
+  }
+
+  // Local file:// Electron shells often reject popups; fall back to redirect when file://
   const shouldPreferRedirect =
-    isCapacitorNative() ||
-    (typeof window !== 'undefined' && window.location.protocol === 'file:');
+    typeof window !== 'undefined' && window.location.protocol === 'file:';
 
   if (shouldPreferRedirect) {
     await signInWithRedirect(auth, googleProvider);
@@ -252,6 +302,9 @@ export async function signInWithGoogle() {
 }
 
 export async function signOutUser() {
+  if (isCapacitorNative()) {
+    await FirebaseAuthentication.signOut().catch(() => {});
+  }
   return signOut(auth);
 }
 

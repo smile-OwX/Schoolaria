@@ -48,7 +48,7 @@ echo [OK] Serveur cible configure : %API_URL%
 echo.
 
 :: ------------------------------------------------------------------------
-:: 2. Verification de Node.js / npm et detection auto JDK + Android SDK
+:: 2. Verification de Node.js / npm et detection auto JDK 21/17 + SDK
 :: ------------------------------------------------------------------------
 where node >nul 2>nul
 if errorlevel 1 (
@@ -63,17 +63,18 @@ if errorlevel 1 (
     goto :fail
 )
 
-:: Detection automatique du JDK integre d'Android Studio si JAVA_HOME absent
+:: Prioriser JDK 21 ou 17 (eviter Java 25 d'Android Studio incompatible avec Gradle 8.14)
 if not defined JAVA_HOME (
-    if exist "%ProgramFiles%\Android\Android Studio\jbr\bin\java.exe" (
-        set "JAVA_HOME=%ProgramFiles%\Android\Android Studio\jbr"
-    ) else if exist "%ProgramFiles%\Android\Android Studio\jre\bin\java.exe" (
-        set "JAVA_HOME=%ProgramFiles%\Android\Android Studio\jre"
-    ) else if exist "%ProgramFiles(x86)%\Android\Android Studio\jbr\bin\java.exe" (
-        set "JAVA_HOME=%ProgramFiles(x86)%\Android\Android Studio\jbr"
-    ) else if exist "%LOCALAPPDATA%\Programs\Android Studio\jbr\bin\java.exe" (
-        set "JAVA_HOME=%LOCALAPPDATA%\Programs\Android Studio\jbr"
-    )
+    for /d %%D in ("%ProgramFiles%\Eclipse Adoptium\jdk-21*") do if exist "%%~D\bin\java.exe" set "JAVA_HOME=%%~D"
+    if not defined JAVA_HOME for /d %%D in ("%ProgramFiles%\Eclipse Adoptium\jdk-17*") do if exist "%%~D\bin\java.exe" set "JAVA_HOME=%%~D"
+    if not defined JAVA_HOME for /d %%D in ("%LOCALAPPDATA%\Programs\Eclipse Adoptium\jdk-21*") do if exist "%%~D\bin\java.exe" set "JAVA_HOME=%%~D"
+    if not defined JAVA_HOME for /d %%D in ("%USERPROFILE%\.jdks\*21*") do if exist "%%~D\bin\java.exe" set "JAVA_HOME=%%~D"
+    if not defined JAVA_HOME for /d %%D in ("%USERPROFILE%\.jdks\*17*") do if exist "%%~D\bin\java.exe" set "JAVA_HOME=%%~D"
+    if not defined JAVA_HOME for /d %%D in ("%ProgramFiles%\Microsoft\jdk-21*") do if exist "%%~D\bin\java.exe" set "JAVA_HOME=%%~D"
+    if not defined JAVA_HOME for /d %%D in ("%ProgramFiles%\Java\jdk-21*") do if exist "%%~D\bin\java.exe" set "JAVA_HOME=%%~D"
+    if not defined JAVA_HOME for /d %%D in ("%ProgramFiles%\Java\jdk-17*") do if exist "%%~D\bin\java.exe" set "JAVA_HOME=%%~D"
+    if not defined JAVA_HOME if exist "%ProgramFiles%\Android\Android Studio\jbr\bin\java.exe" set "JAVA_HOME=%ProgramFiles%\Android\Android Studio\jbr"
+    if not defined JAVA_HOME if exist "%ProgramFiles%\Android\Android Studio\jre\bin\java.exe" set "JAVA_HOME=%ProgramFiles%\Android\Android Studio\jre"
 )
 
 if defined JAVA_HOME (
@@ -82,8 +83,7 @@ if defined JAVA_HOME (
 ) else (
     where java >nul 2>nul
     if errorlevel 1 (
-        echo [ERREUR] Java JDK introuvable ^(Android Studio JBR ou JDK 17 requis^).
-        echo Verifiez l'installation d'Android Studio ou definissez JAVA_HOME.
+        echo [ERREUR] Java JDK introuvable ^(JDK 21 ou 17 requis^).
         goto :fail
     )
     echo [OK] Java detecte dans le PATH systeme.
@@ -114,28 +114,32 @@ echo [OK] ANDROID_HOME detecte : %ANDROID_HOME%
 echo.
 
 :: ------------------------------------------------------------------------
-:: 3. Installation des dependances npm & Capacitor Android (si manquantes)
+:: 3. Installation des dependances npm & Capacitor Firebase Auth
 :: ------------------------------------------------------------------------
 if not exist "node_modules\" (
-    echo [1/5] Installation des dependances du projet ^(npm install^)...
-    call npm install
+    echo [1/5] Installation des dependances du projet ^(--legacy-peer-deps^)...
+    call npm install --legacy-peer-deps
     if errorlevel 1 (
-        echo [ERREUR] Echec de npm install.
+        echo [ERREUR] Echec de npm install --legacy-peer-deps.
         goto :fail
     )
 ) else (
     echo [1/5] Dependances de base deja installees.
 )
 
-if not exist "node_modules\@capacitor\android\package.json" (
-    echo [2/5] Installation de Capacitor Android ^(@capacitor/core, cli, android^)...
-    call npm install --no-audit --no-fund @capacitor/core @capacitor/cli @capacitor/android
+set "NEED_CAP_INSTALL=0"
+if not exist "node_modules\@capacitor\android\package.json" set "NEED_CAP_INSTALL=1"
+if not exist "node_modules\@capacitor-firebase\authentication\package.json" set "NEED_CAP_INSTALL=1"
+
+if "%NEED_CAP_INSTALL%"=="1" (
+    echo [2/5] Installation de Capacitor Android ^& Google Auth natif...
+    call npm install --legacy-peer-deps --no-audit --no-fund @capacitor/core @capacitor/cli @capacitor/android @capacitor-firebase/authentication
     if errorlevel 1 (
         echo [ERREUR] Echec de l'installation de Capacitor Android.
         goto :fail
     )
 ) else (
-    echo [2/5] Capacitor Android deja installe.
+    echo [2/5] Capacitor Android et Firebase Auth natif deja installes.
 )
 
 :: ------------------------------------------------------------------------
@@ -152,7 +156,7 @@ if errorlevel 1 (
 )
 
 :: ------------------------------------------------------------------------
-:: 5. Creation ou synchronisation du projet Android Capacitor
+:: 5. Creation / mise a jour du projet Android & google-services.json
 :: ------------------------------------------------------------------------
 echo.
 echo [4/5] Synchronisation Capacitor Android...
@@ -173,10 +177,43 @@ if not exist "android\local.properties" (
     echo [OK] Fichier android\local.properties genere automatiquement.
 )
 
+:: Activer rgcfaIncludeGoogle = true dans android\variables.gradle
+node -e "const fs=require('fs'),p='android/variables.gradle';if(fs.existsSync(p)){let s=fs.readFileSync(p,'utf8');if(!s.includes('rgcfaIncludeGoogle')){s=s.replace(/ext\s*\{/,'ext {\r\n    rgcfaIncludeGoogle = true');fs.writeFileSync(p,s,'utf8');console.log('[OK] rgcfaIncludeGoogle = true ajoute dans android/variables.gradle');}}"
+
 call npx cap sync android
 if errorlevel 1 (
     echo [ERREUR] Echec de npx cap sync android.
     goto :fail
+)
+
+:: Verifier google-services.json (indispensable pour la connexion Google native Android)
+:check_google_services
+if not exist "android\app\google-services.json" (
+    echo.
+    echo ========================================================================
+    echo   ACTION REQUISE ^(1 SEULE FOIS^) : google-services.json manquant
+    echo ========================================================================
+    echo   Pour que le bouton "Continuer avec Google" fonctionne nativement dans
+    echo   l'APK Android sans passer par Chrome :
+    echo.
+    echo   Calcul de votre empreinte SHA-1 en cours...
+    echo.
+    pushd android
+    call gradlew.bat --stop >nul 2>nul
+    call gradlew.bat signingReport | findstr /I "SHA1:"
+    popd
+    echo.
+    echo   1. Ouvrez Firebase Console ^> Projet "gen-lang-client-0572045736"
+    echo   2. Parametres du projet ^> Vos applications ^> Ajouter une app Android
+    echo   3. Nom du package Android : com.schoolaria.app
+    echo   4. Collez le SHA1 affiche juste au-dessus ^(dans l'app Android Firebase^)
+    echo   5. Telechargez "google-services.json" et copiez-le ici :
+    echo      %~dp0android\app\google-services.json
+    echo ========================================================================
+    echo.
+    if "%NO_PAUSE%"=="1" goto :fail
+    pause
+    if not exist "android\app\google-services.json" goto :check_google_services
 )
 
 :: ------------------------------------------------------------------------
@@ -184,9 +221,9 @@ if errorlevel 1 (
 :: ------------------------------------------------------------------------
 echo.
 echo [5/5] Generation du fichier APK via Gradle ^(assembleDebug^)...
-echo       ^(Le premier lancement peut prendre 2 a 5 minutes le temps de telecharger Gradle^)
 echo.
 pushd android
+call gradlew.bat --stop >nul 2>nul
 call gradlew.bat assembleDebug
 set "GRADLE_ERR=%ERRORLEVEL%"
 popd
@@ -194,8 +231,6 @@ popd
 if not "%GRADLE_ERR%"=="0" (
     echo.
     echo [ERREUR] Echec de la compilation Gradle ^(code %GRADLE_ERR%^).
-    echo Astuce : Si Gradle mentionne les licences SDK, lancez dans CMD :
-    echo   "%ANDROID_HOME%\cmdline-tools\latest\bin\sdkmanager.bat" --licenses
     goto :fail
 )
 
@@ -213,18 +248,11 @@ echo ========================================================================
 echo   SUCCES ! VOTRE APK ANDROID EST PRET A INSTALLER
 echo ========================================================================
 echo.
-echo   Fichier principal : %~dp0release\Schoolaria-v1.0.0.apk
-echo   Original Gradle   : %~dp0%RAW_APK%
+echo   Fichier APK pret : %~dp0release\Schoolaria-v1.0.0.apk
 echo   Serveur configure : %API_URL%
 echo.
-echo   Pour installer sur votre telephone Android :
-echo     1. Copiez "release\Schoolaria-v1.0.0.apk" sur votre telephone et ouvrez-le
-echo     2. OU branchez le telephone en USB ^(debogage USB active^) et tapez :
-echo        adb install -r "release\Schoolaria-v1.0.0.apk"
-echo.
-echo   Connexion Google sur APK :
-echo     - Firebase Console ^> Authentication ^> Authorized domains : ajoutez "localhost"
-echo     - Pour l'empreinte SHA-1 : cd android ^&^& gradlew.bat signingReport
+echo   Copiez "release\Schoolaria-v1.0.0.apk" sur votre telephone et installez-le.
+echo   La connexion Google s'ouvrira nativement dans Android ^(sans page Chrome^).
 echo ========================================================================
 echo.
 if "%NO_PAUSE%"=="0" pause
