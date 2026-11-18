@@ -1,6 +1,7 @@
-# Guide complet de compilation PC (`.exe`) & Android (`.apk`)
+# Guide direct de compilation : `.exe` (Windows) & `.apk` (Android)
 
-Ce guide vous permet de générer sans erreur le fichier installable **Windows (`.exe`)** et **Android (`.apk`)** connectés à votre serveur Node.js cloud unique.
+**Tout est déjà pré-configuré dans `package.json`, `vite.config.ts`, `capacitor.config.ts`, `electron/main.cjs` et `creer-apk.bat`.**  
+Vous n'avez **aucun fichier de code ou JSON à modifier**.
 
 ---
 
@@ -12,102 +13,76 @@ npm install
 npm run build
 GEMINI_API_KEY="votre_cle_gemini" PORT=3000 npm start
 ```
-Récupérez votre URL HTTPS publique (ex : `https://schoolaria-serveur.run.app`).
+Notez l'URL HTTPS publique de votre serveur (exemple : `https://ais-pre-m6gzqqvvbgs75evw5t7ntn-1010398430814.europe-west2.run.app`).
 
 ---
 
 ## Étape 2 : Autoriser les domaines dans Firebase Authentication
 
-Dans la **Console Firebase → Authentication → Settings → Authorized domains**, ajoutez :
-1. Le domaine de votre serveur Node.js cloud (`schoolaria-serveur.run.app`)
+Dans **Firebase Console → Authentication → Settings → Authorized domains**, ajoutez :
+1. Le domaine de votre serveur cloud
 2. `localhost`
 3. `capacitor://localhost`
 
 ---
 
-## Étape 3 : Compiler le fichier PC Windows (`.exe`) avec Electron
+## Étape 3 : Générer l'installateur Windows (`.exe`) sur votre PC
 
-Prérequis sur votre PC Windows : **Node.js 20 LTS** (ou supérieur).
+Prérequis sur Windows : **Node.js 20 LTS** (ou supérieur).  
+Ouvrez **CMD** dans le dossier du projet et exécutez ces **4 commandes** :
 
-1. Générez le bundle desktop (sans service worker PWA, chemins relatifs `./`) :
-```bash
-# Sous PowerShell Windows :
-$env:VITE_API_BASE_URL="https://schoolaria-serveur.run.app"
-npm run build:desktop
-```
-*(Sous Linux / macOS / Git Bash : `VITE_API_BASE_URL="https://schoolaria-serveur.run.app" npm run build:desktop`)*
-
-2. Installez Electron et Electron Builder en local sur votre poste de compilation :
-```bash
+```cmd
+npm install
+set VITE_API_BASE_URL=https://ais-pre-m6gzqqvvbgs75evw5t7ntn-1010398430814.europe-west2.run.app
 npm install -D electron electron-builder
+npm run build:exe
 ```
 
-3. Testez l'application desktop immédiatement :
-```bash
-npx electron electron/main.cjs
-```
+> Résultat : votre fichier `.exe` est généré dans **`release\Schoolaria Setup 1.0.0.exe`** (et une version portable sans installation dans `release\Schoolaria 1.0.0.exe`).
 
-4. Générez l'installateur `.exe` (et version portable `.exe`) dans le dossier `release/` :
-```bash
-npx electron-builder --win nsis portable \
-  --config.appId="com.schoolaria.app" \
-  --config.productName="Schoolaria" \
-  --config.directories.output="release" \
-  --config.extraMetadata.main="electron/main.cjs" \
-  --config.files="dist/**/*" \
-  --config.files="electron/**/*" \
-  --config.win.target="nsis"
-```
-Votre installateur se trouvera dans `release/Schoolaria Setup 0.0.0.exe`.
+*(Pour tester l'application desktop avant de créer le `.exe` : `npm run desktop:preview`)*
 
 ---
 
-## Étape 4 : Compiler le fichier Android (`.apk`) avec Capacitor & Android Studio
+## Étape 4 : Générer l'application Android (`.apk`) depuis Windows CMD
 
-Prérequis sur votre PC : **Node.js 20 LTS**, **JDK 17** et **Android Studio** (avec Android SDK installé).
+Prérequis sur votre PC : **Node.js 20 LTS** et **Android Studio** (avec Android SDK installé).
 
-1. Générez le bundle mobile natif :
-```bash
-# Sous PowerShell Windows :
-$env:VITE_API_BASE_URL="https://schoolaria-serveur.run.app"
-npm run build:native
+### Méthode automatique (1 seule commande CMD)
+
+Ouvrez l'Invite de commandes (**CMD**) dans le dossier du projet et tapez :
+```cmd
+creer-apk.bat
 ```
-*(Sous Linux / macOS / Git Bash : `VITE_API_BASE_URL="https://schoolaria-serveur.run.app" npm run build:native`)*
+- Appuyez sur **Entrée** pour confirmer l'URL serveur pré-configurée (ou collez une autre URL).
+- Le script détecte automatiquement le JDK d'Android Studio et votre SDK Android, installe Capacitor si absent, compile le bundle mobile, synchronise `android\` et lance Gradle.
+- Votre APK prêt à installer sur téléphone est généré dans : **`release\Schoolaria-v1.0.0.apk`**.
 
-2. Installez Capacitor et créez le projet Android (à faire une seule fois) :
-```bash
+### Méthode manuelle CMD (étape par étape)
+
+```cmd
+npm install
+set VITE_API_BASE_URL=https://ais-pre-m6gzqqvvbgs75evw5t7ntn-1010398430814.europe-west2.run.app
 npm install @capacitor/core @capacitor/cli @capacitor/android
+npm run build:native
 npx cap add android
-```
-
-3. Synchronisez vos fichiers `dist/` vers le projet Android :
-```bash
 npx cap sync android
+cd android && gradlew.bat assembleDebug
 ```
+Le fichier créé est dans **`android\app\build\outputs\apk\debug\app-debug.apk`**.
 
-4. Générez l'`.apk` :
-- **Option A (via Android Studio)** :
-  ```bash
-  npx cap open android
-  ```
-  Dans Android Studio : **Build → Build Bundle(s) / APK(s) → Build APK(s)**.
-  Le fichier généré est dans `android/app/build/outputs/apk/debug/app-debug.apk`.
-- **Option B (en ligne de commande directe avec Gradle)** :
-  ```bash
-  cd android
-  ./gradlew assembleDebug    # Windows PowerShell : .\gradlew.bat assembleDebug
-  ```
-  *(Pour un APK Release signé Google Play, utilisez `Build → Generate Signed Bundle / APK` dans Android Studio).*
-
-5. **Connexion Google sur Android APK** :
-   Récupérez votre empreinte SHA-1 via `./gradlew signingReport` puis ajoutez-la dans **Firebase Console → Paramètres du projet → Vos applications → Android**.
+### Connexion Google sur Android (`.apk`)
+Dans le dossier `android/`, exécutez `gradlew.bat signingReport`, copiez l'empreinte **SHA-1**, puis ajoutez-la dans **Firebase Console → Paramètres du projet → Vos applications → Android**.
 
 ---
 
 ## Option iOS (`.ipa` sur macOS + Xcode)
+
 ```bash
-VITE_API_BASE_URL="https://schoolaria-serveur.run.app" npm run build:native
+npm install
+export VITE_API_BASE_URL="https://ais-pre-m6gzqqvvbgs75evw5t7ntn-1010398430814.europe-west2.run.app"
 npm install @capacitor/core @capacitor/cli @capacitor/ios
-npx cap add ios && npx cap sync ios && npx cap open ios
+npx cap add ios
+npm run cap:ios
 ```
-Dans Xcode : sélectionnez votre compte Signature puis **Product → Archive**.
+Dans Xcode : choisissez votre équipe de signature (*Signing & Capabilities*) puis **Product → Archive**.

@@ -1,15 +1,21 @@
 {
-  "name": "react-example",
+  "name": "schoolaria",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "tsx server.ts",
     "start": "node server.ts",
     "build": "vite build",
-    "build:native": "VITE_APP_TARGET=native vite build",
-    "build:desktop": "VITE_APP_TARGET=desktop vite build",
+    "build:native": "cross-env VITE_APP_TARGET=native vite build",
+    "build:desktop": "cross-env VITE_APP_TARGET=desktop vite build",
     "cap:sync": "npm run build:native && npx cap sync",
+    "cap:android": "npm run build:native && npx cap sync android && npx cap open android",
+    "cap:apk": "npm run build:native && npx cap sync android",
+    "cap:ios": "npm run build:native && npx cap sync ios && npx cap open ios",
+    "desktop:preview": "npm run build:desktop && npx electron electron/main.cjs",
+    "build:exe": "npm run build:desktop && npx electron-builder --win",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
@@ -37,10 +43,39 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
+    "cross-env": "^10.1.0",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2",
     "vite-plugin-pwa": "^2.0.0"
+  },
+  "build": {
+    "appId": "com.schoolaria.app",
+    "productName": "Schoolaria",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ]
+    }
   }
 }

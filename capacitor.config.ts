@@ -11,6 +11,7 @@ const config = {
       '*.firebaseapp.com',
       '*.googleapis.com',
       'accounts.google.com',
+      '*.google.com',
       '*.run.app',
     ],
   },
