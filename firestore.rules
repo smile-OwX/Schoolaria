@@ -1,0 +1,753 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Hardened Primitives ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 256 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email is string;
+    }
+
+    function authEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    function safeEmailKey(email) {
+      return email.lower().replace('[^a-z0-9_\\-]', '_');
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        authEmail() == 'smile.owx@gmail.com'
+      );
+    }
+
+    function ownsExistingSchool(schoolId) {
+      return isValidId(schoolId)
+        && exists(/databases/$(database)/documents/schools/$(schoolId))
+        && get(/databases/$(database)/documents/schools/$(schoolId)).data.ownerId == request.auth.uid;
+    }
+
+    function isStudentLockedEmailInSchool(schoolId, email) {
+      return isValidId(schoolId)
+        && email is string
+        && email.size() >= 3
+        && exists(/databases/$(database)/documents/studentLocks/$(('stulock_' + schoolId + '_' + safeEmailKey(email))));
+    }
+
+    function isStudentLockedInSchool(schoolId) {
+      return isStudentLockedEmailInSchool(schoolId, authEmail());
+    }
+
+    function isMemberByDocId(schoolId) {
+      return isValidId(schoolId) && (
+        (
+          !isStudentLockedInSchool(schoolId) &&
+          exists(/databases/$(database)/documents/memberships/$(('mem_' + schoolId + '_teacher_' + safeEmailKey(authEmail()))))
+        ) ||
+        exists(/databases/$(database)/documents/memberships/$(('mem_' + schoolId + '_parent_' + safeEmailKey(authEmail()))))
+      );
+    }
+
+    function validStudentForWrite(studentId, schoolId, docOwnerId) {
+      return isValidId(studentId)
+        && exists(/databases/$(database)/documents/students/$(studentId))
+        && get(/databases/$(database)/documents/students/$(studentId)).data.schoolId == schoolId
+        && get(/databases/$(database)/documents/students/$(studentId)).data.ownerId == docOwnerId
+        && (
+          get(/databases/$(database)/documents/students/$(studentId)).data.ownerId == request.auth.uid ||
+          (
+            !isStudentLockedInSchool(schoolId) &&
+            'teacherEmails' in get(/databases/$(database)/documents/students/$(studentId)).data &&
+            authEmail() in get(/databases/$(database)/documents/students/$(studentId)).data.teacherEmails
+          )
+        );
+    }
+
+    function studentParentEmailMatches(studentId, incomingData) {
+      let stu = get(/databases/$(database)/documents/students/$(studentId)).data;
+      let stuParent = ('parentEmail' in stu) ? stu.parentEmail : '';
+      let incParent = ('parentEmail' in incomingData) ? incomingData.parentEmail : '';
+      return stuParent == incParent;
+    }
+
+    function canWriteInSchool(schoolId, docOwnerId) {
+      return isValidId(schoolId)
+        && exists(/databases/$(database)/documents/schools/$(schoolId))
+        && get(/databases/$(database)/documents/schools/$(schoolId)).data.ownerId == docOwnerId
+        && (
+          get(/databases/$(database)/documents/schools/$(schoolId)).data.ownerId == request.auth.uid ||
+          ('memberEmails' in get(/databases/$(database)/documents/schools/$(schoolId)).data && authEmail() in get(/databases/$(database)/documents/schools/$(schoolId)).data.memberEmails) ||
+          isMemberByDocId(schoolId)
+        );
+    }
+
+    function canStaffWriteInSchool(schoolId, docOwnerId) {
+      return isValidId(schoolId)
+        && exists(/databases/$(database)/documents/schools/$(schoolId))
+        && get(/databases/$(database)/documents/schools/$(schoolId)).data.ownerId == docOwnerId
+        && (
+          get(/databases/$(database)/documents/schools/$(schoolId)).data.ownerId == request.auth.uid ||
+          (
+            !isStudentLockedInSchool(schoolId) && (
+              ('staffEmails' in get(/databases/$(database)/documents/schools/$(schoolId)).data && authEmail() in get(/databases/$(database)/documents/schools/$(schoolId)).data.staffEmails) ||
+              exists(/databases/$(database)/documents/memberships/$(('mem_' + schoolId + '_teacher_' + safeEmailKey(authEmail()))))
+            )
+          )
+        );
+    }
+
+    function isNullableScore(val) {
+      return val == null || ((val is int || val is float) && val >= 0 && val <= 20);
+    }
+
+    function isValidEmailList(list, maxSize) {
+      return list is list && list.size() <= maxSize && (list.size() == 0 || list[0] is string);
+    }
+
+    function isValidStringList(list, maxSize) {
+      return list is list && list.size() <= maxSize && (list.size() == 0 || list[0] is string);
+    }
+
+    // --- Validation Blueprints ---
+    function isValidSchool(data) {
+      return data.keys().hasAll(['ownerId', 'schoolName', 'adminName', 'academicYear', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'schoolName', 'adminName', 'academicYear', 'motto', 'phone', 'email', 'address', 'city', 'registrationCode', 'memberEmails', 'staffEmails', 'createdAt', 'updatedAt'])
+        && isValidId(data.ownerId)
+        && data.schoolName is string && data.schoolName.size() >= 2 && data.schoolName.size() <= 120
+        && data.adminName is string && data.adminName.size() >= 2 && data.adminName.size() <= 100
+        && data.academicYear is string && data.academicYear.size() >= 4 && data.academicYear.size() <= 20
+        && (!('motto' in data) || (data.motto is string && data.motto.size() <= 160))
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 30))
+        && (!('email' in data) || (data.email is string && data.email.size() <= 120))
+        && (!('address' in data) || (data.address is string && data.address.size() <= 160))
+        && (!('city' in data) || (data.city is string && data.city.size() <= 80))
+        && (!('registrationCode' in data) || (data.registrationCode is string && data.registrationCode.size() <= 60))
+        && (!('memberEmails' in data) || isValidEmailList(data.memberEmails, 100))
+        && (!('staffEmails' in data) || isValidEmailList(data.staffEmails, 100))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidClassroom(data) {
+      return data.keys().hasAll(['ownerId', 'schoolId', 'name', 'level', 'cycle', 'motif', 'accentColor', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'schoolId', 'name', 'level', 'cycle', 'series', 'motif', 'accentColor', 'room', 'headTeacher', 'slogan', 'teacherEmails', 'memberEmails', 'createdAt', 'updatedAt'])
+        && isValidId(data.ownerId)
+        && isValidId(data.schoolId)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 40
+        && data.level is string && data.level.size() >= 1 && data.level.size() <= 30
+        && data.cycle in ['Primaire', 'Collège', 'Lycée']
+        && (!('series' in data) || (data.series is string && data.series.size() <= 40))
+        && data.motif in ['maths-physique', 'lettres-philo', 'sciences-nat', 'general']
+        && data.accentColor is string && data.accentColor.size() >= 1 && data.accentColor.size() <= 30
+        && (!('room' in data) || (data.room is string && data.room.size() <= 40))
+        && (!('headTeacher' in data) || (data.headTeacher is string && data.headTeacher.size() <= 80))
+        && (!('slogan' in data) || (data.slogan is string && data.slogan.size() <= 140))
+        && (!('teacherEmails' in data) || isValidEmailList(data.teacherEmails, 25))
+        && (!('memberEmails' in data) || isValidEmailList(data.memberEmails, 100))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMembership(data) {
+      return data.keys().hasAll(['ownerId', 'schoolId', 'memberEmail', 'memberName', 'role', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'schoolId', 'memberEmail', 'memberName', 'role', 'assignedClasses', 'assignedSubject', 'childStudentIds', 'createdAt', 'updatedAt'])
+        && isValidId(data.ownerId)
+        && isValidId(data.schoolId)
+        && data.memberEmail is string && data.memberEmail.size() >= 3 && data.memberEmail.size() <= 120
+        && data.memberName is string && data.memberName.size() >= 2 && data.memberName.size() <= 100
+        && data.role in ['teacher', 'parent']
+        && (!('assignedClasses' in data) || isValidStringList(data.assignedClasses, 25))
+        && (!('assignedSubject' in data) || (data.assignedSubject is string && data.assignedSubject.size() <= 80))
+        && (!('childStudentIds' in data) || isValidStringList(data.childStudentIds, 15))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidStudent(data) {
+      return data.keys().hasAll(['ownerId', 'schoolId', 'matricule', 'nom', 'prenoms', 'sexe', 'age', 'cycle', 'classe', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'schoolId', 'matricule', 'nom', 'prenoms', 'sexe', 'age', 'cycle', 'classe', 'guardianName', 'guardianPhone', 'parentEmail', 'studentEmail', 'teacherEmails', 'status', 'createdAt', 'updatedAt'])
+        && isValidId(data.ownerId)
+        && isValidId(data.schoolId)
+        && data.matricule is string && data.matricule.size() >= 2 && data.matricule.size() <= 30
+        && data.nom is string && data.nom.size() >= 1 && data.nom.size() <= 80
+        && data.prenoms is string && data.prenoms.size() >= 1 && data.prenoms.size() <= 100
+        && data.sexe in ['M', 'F']
+        && data.age is int && data.age >= 3 && data.age <= 30
+        && data.cycle in ['Primaire', 'Collège', 'Lycée']
+        && data.classe is string && data.classe.size() >= 1 && data.classe.size() <= 40
+        && (!('guardianName' in data) || (data.guardianName is string && data.guardianName.size() <= 100))
+        && (!('guardianPhone' in data) || (data.guardianPhone is string && data.guardianPhone.size() <= 30))
+        && (!('parentEmail' in data) || (data.parentEmail is string && data.parentEmail.size() <= 120))
+        && (!('studentEmail' in data) || (data.studentEmail is string && data.studentEmail.size() <= 120))
+        && (!('teacherEmails' in data) || isValidEmailList(data.teacherEmails, 25))
+        && data.status in ['actif', 'archive']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidStudentLock(data) {
+      return data.keys().hasAll(['ownerId', 'schoolId', 'studentId', 'studentEmail', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'schoolId', 'studentId', 'studentEmail', 'createdAt', 'updatedAt'])
+        && isValidId(data.ownerId)
+        && isValidId(data.schoolId)
+        && isValidId(data.studentId)
+        && data.studentEmail is string && data.studentEmail.size() >= 3 && data.studentEmail.size() <= 120
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSubject(data) {
+      return data.keys().hasAll(['ownerId', 'schoolId', 'name', 'cycle', 'coef', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'schoolId', 'name', 'cycle', 'coef', 'teacherName', 'memberEmails', 'createdAt', 'updatedAt'])
+        && isValidId(data.ownerId)
+        && isValidId(data.schoolId)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
+        && data.cycle in ['Primaire', 'Collège', 'Lycée']
+        && (data.coef is int || data.coef is float) && data.coef >= 1 && data.coef <= 10
+        && (!('teacherName' in data) || (data.teacherName is string && data.teacherName.size() <= 80))
+        && (!('memberEmails' in data) || isValidEmailList(data.memberEmails, 100))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidGrade(data) {
+      return data.keys().hasAll(['ownerId', 'schoolId', 'studentId', 'classe', 'subjectId', 'subjectName', 'coef', 'trimester', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'schoolId', 'studentId', 'classe', 'subjectId', 'subjectName', 'coef', 'trimester', 'int1', 'int2', 'devoir', 'compo', 'appreciation', 'parentEmail', 'teacherEmails', 'createdAt', 'updatedAt'])
+        && isValidId(data.ownerId)
+        && isValidId(data.schoolId)
+        && isValidId(data.studentId)
+        && data.classe is string && data.classe.size() >= 1 && data.classe.size() <= 40
+        && isValidId(data.subjectId)
+        && data.subjectName is string && data.subjectName.size() >= 1 && data.subjectName.size() <= 80
+        && (data.coef is int || data.coef is float) && data.coef >= 1 && data.coef <= 10
+        && data.trimester is int && data.trimester >= 1 && data.trimester <= 3
+        && (!('int1' in data) || isNullableScore(data.int1))
+        && (!('int2' in data) || isNullableScore(data.int2))
+        && (!('devoir' in data) || isNullableScore(data.devoir))
+        && (!('compo' in data) || isNullableScore(data.compo))
+        && (!('appreciation' in data) || (data.appreciation is string && data.appreciation.size() <= 200))
+        && (!('parentEmail' in data) || (data.parentEmail is string && data.parentEmail.size() <= 120))
+        && (!('teacherEmails' in data) || isValidEmailList(data.teacherEmails, 25))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidBulletinRemark(data) {
+      return data.keys().hasAll(['ownerId', 'schoolId', 'studentId', 'trimester', 'absences', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'schoolId', 'studentId', 'trimester', 'absences', 'conduite', 'decision', 'generalRemark', 'parentEmail', 'teacherEmails', 'createdAt', 'updatedAt'])
+        && isValidId(data.ownerId)
+        && isValidId(data.schoolId)
+        && isValidId(data.studentId)
+        && data.trimester is int && data.trimester >= 1 && data.trimester <= 3
+        && data.absences is int && data.absences >= 0 && data.absences <= 365
+        && (!('conduite' in data) || (data.conduite is string && data.conduite.size() <= 60))
+        && (!('decision' in data) || (data.decision is string && data.decision.size() <= 80))
+        && (!('generalRemark' in data) || (data.generalRemark is string && data.generalRemark.size() <= 400))
+        && (!('parentEmail' in data) || (data.parentEmail is string && data.parentEmail.size() <= 120))
+        && (!('teacherEmails' in data) || isValidEmailList(data.teacherEmails, 25))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMessage(data) {
+      return data.keys().hasAll(['ownerId', 'schoolId', 'senderUid', 'senderEmail', 'senderName', 'senderRole', 'recipientEmail', 'recipientName', 'subject', 'body', 'read', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'schoolId', 'senderUid', 'senderEmail', 'senderName', 'senderRole', 'recipientEmail', 'recipientName', 'studentId', 'studentName', 'classe', 'subject', 'body', 'read', 'createdAt', 'updatedAt'])
+        && isValidId(data.ownerId)
+        && isValidId(data.schoolId)
+        && isValidId(data.senderUid)
+        && data.senderEmail is string && data.senderEmail.size() >= 3 && data.senderEmail.size() <= 120
+        && data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 100
+        && data.senderRole in ['admin', 'teacher', 'parent']
+        && data.recipientEmail is string && data.recipientEmail.size() >= 3 && data.recipientEmail.size() <= 120
+        && data.recipientName is string && data.recipientName.size() >= 1 && data.recipientName.size() <= 100
+        && (!('studentId' in data) || (data.studentId is string && data.studentId.size() <= 128))
+        && (!('studentName' in data) || (data.studentName is string && data.studentName.size() <= 120))
+        && (!('classe' in data) || (data.classe is string && data.classe.size() <= 40))
+        && data.subject is string && data.subject.size() >= 1 && data.subject.size() <= 140
+        && data.body is string && data.body.size() >= 1 && data.body.size() <= 2000
+        && data.read is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['ownerId', 'schoolId', 'type', 'title', 'message', 'audienceEmails', 'createdByEmail', 'createdByName', 'read', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'schoolId', 'type', 'title', 'message', 'targetClasse', 'studentId', 'audienceEmails', 'createdByEmail', 'createdByName', 'read', 'createdAt', 'updatedAt'])
+        && isValidId(data.ownerId)
+        && isValidId(data.schoolId)
+        && data.type in ['grade', 'absence', 'announcement']
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 140
+        && data.message is string && data.message.size() >= 1 && data.message.size() <= 600
+        && (!('targetClasse' in data) || (data.targetClasse is string && data.targetClasse.size() <= 40))
+        && (!('studentId' in data) || (data.studentId is string && data.studentId.size() <= 128))
+        && isValidEmailList(data.audienceEmails, 100)
+        && data.createdByEmail is string && data.createdByEmail.size() >= 3 && data.createdByEmail.size() <= 120
+        && data.createdByName is string && data.createdByName.size() >= 1 && data.createdByName.size() <= 100
+        && data.read is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['ownerId', 'schoolId', 'weekKey', 'category', 'severity', 'action', 'details', 'actorUid', 'actorEmail', 'actorName', 'actorRole', 'createdAt'])
+        && data.keys().hasOnly(['ownerId', 'schoolId', 'weekKey', 'category', 'severity', 'action', 'details', 'actorUid', 'actorEmail', 'actorName', 'actorRole', 'targetId', 'createdAt'])
+        && isValidId(data.ownerId)
+        && isValidId(data.schoolId)
+        && data.weekKey is string && data.weekKey.matches('^[0-9]{4}-W[0-9]{2}$')
+        && data.category in ['auth', 'student', 'grade', 'bulletin', 'classroom', 'subject', 'rbac', 'settings', 'security', 'export']
+        && data.severity in ['info', 'warning', 'critical']
+        && data.action is string && data.action.size() >= 2 && data.action.size() <= 100
+        && data.details is string && data.details.size() >= 1 && data.details.size() <= 500
+        && isValidId(data.actorUid)
+        && data.actorEmail is string && data.actorEmail.size() >= 3 && data.actorEmail.size() <= 120
+        && data.actorName is string && data.actorName.size() >= 1 && data.actorName.size() <= 100
+        && data.actorRole in ['admin', 'teacher', 'parent']
+        && (!('targetId' in data) || (data.targetId is string && data.targetId.size() <= 128))
+        && data.createdAt is timestamp;
+    }
+
+    // --- Collection Match Blocks ---
+
+    match /admins/{adminId} {
+      allow get: if isVerifiedUser() && request.auth.uid == adminId;
+      allow list, write: if false;
+    }
+
+    match /schools/{schoolId} {
+      allow get: if isVerifiedUser() && isValidId(schoolId) && (
+        existing().ownerId == request.auth.uid ||
+        ('memberEmails' in existing() && authEmail() in existing().memberEmails) ||
+        isMemberByDocId(schoolId) ||
+        isAdmin()
+      );
+      allow list: if isVerifiedUser() && (
+        resource.data.ownerId == request.auth.uid ||
+        ('memberEmails' in resource.data && authEmail() in resource.data.memberEmails)
+      );
+      allow create: if isVerifiedUser()
+        && isValidId(schoolId)
+        && isValidSchool(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(schoolId)
+        && isValidSchool(incoming())
+        && (existing().ownerId == request.auth.uid || isAdmin())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['schoolName', 'adminName', 'academicYear', 'motto', 'phone', 'email', 'address', 'city', 'registrationCode', 'memberEmails', 'staffEmails', 'updatedAt'])
+        );
+      allow delete: if isVerifiedUser() && isValidId(schoolId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /classrooms/{classroomId} {
+      allow get: if isVerifiedUser() && isValidId(classroomId) && (
+        existing().ownerId == request.auth.uid ||
+        (!isStudentLockedInSchool(existing().schoolId) && 'teacherEmails' in existing() && authEmail() in existing().teacherEmails) ||
+        ('memberEmails' in existing() && authEmail() in existing().memberEmails) ||
+        isMemberByDocId(existing().schoolId) ||
+        isAdmin()
+      );
+      allow list: if isVerifiedUser() && (
+        resource.data.ownerId == request.auth.uid ||
+        ('teacherEmails' in resource.data && authEmail() in resource.data.teacherEmails) ||
+        ('memberEmails' in resource.data && authEmail() in resource.data.memberEmails)
+      );
+      allow create: if isVerifiedUser()
+        && isValidId(classroomId)
+        && isValidClassroom(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && ownsExistingSchool(incoming().schoolId);
+      allow update: if isVerifiedUser()
+        && isValidId(classroomId)
+        && isValidClassroom(incoming())
+        && (existing().ownerId == request.auth.uid || isAdmin())
+        && incoming().ownerId == existing().ownerId
+        && incoming().schoolId == existing().schoolId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'level', 'cycle', 'series', 'motif', 'accentColor', 'room', 'headTeacher', 'slogan', 'teacherEmails', 'memberEmails', 'updatedAt'])
+        );
+      allow delete: if isVerifiedUser() && isValidId(classroomId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /memberships/{membershipId} {
+      allow get: if isVerifiedUser() && isValidId(membershipId) && (
+        existing().ownerId == request.auth.uid ||
+        existing().memberEmail == authEmail() ||
+        isAdmin()
+      );
+      allow list: if isVerifiedUser() && (
+        resource.data.ownerId == request.auth.uid ||
+        resource.data.memberEmail == authEmail()
+      );
+      allow create: if isVerifiedUser()
+        && isValidId(membershipId)
+        && isValidMembership(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && ownsExistingSchool(incoming().schoolId)
+        && (
+          incoming().role != 'teacher' ||
+          !isStudentLockedEmailInSchool(incoming().schoolId, incoming().memberEmail)
+        );
+      allow update: if isVerifiedUser()
+        && isValidId(membershipId)
+        && isValidMembership(incoming())
+        && (existing().ownerId == request.auth.uid || isAdmin())
+        && incoming().ownerId == existing().ownerId
+        && incoming().schoolId == existing().schoolId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().role != 'teacher' ||
+          !isStudentLockedEmailInSchool(incoming().schoolId, incoming().memberEmail)
+        )
+        && (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['memberEmail', 'memberName', 'role', 'assignedClasses', 'assignedSubject', 'childStudentIds', 'updatedAt'])
+        );
+      allow delete: if isVerifiedUser() && isValidId(membershipId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /students/{studentId} {
+      allow get: if isVerifiedUser() && isValidId(studentId) && (
+        existing().ownerId == request.auth.uid ||
+        ('parentEmail' in existing() && existing().parentEmail == authEmail()) ||
+        (!isStudentLockedInSchool(existing().schoolId) && 'teacherEmails' in existing() && authEmail() in existing().teacherEmails) ||
+        isAdmin()
+      );
+      allow list: if isVerifiedUser() && (
+        resource.data.ownerId == request.auth.uid ||
+        ('parentEmail' in resource.data && resource.data.parentEmail == authEmail()) ||
+        ('teacherEmails' in resource.data && authEmail() in resource.data.teacherEmails)
+      );
+      allow create: if isVerifiedUser()
+        && isValidId(studentId)
+        && isValidStudent(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && ownsExistingSchool(incoming().schoolId);
+      allow update: if isVerifiedUser()
+        && isValidId(studentId)
+        && isValidStudent(incoming())
+        && (existing().ownerId == request.auth.uid || isAdmin())
+        && incoming().ownerId == existing().ownerId
+        && incoming().schoolId == existing().schoolId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['matricule', 'nom', 'prenoms', 'sexe', 'age', 'cycle', 'classe', 'guardianName', 'guardianPhone', 'parentEmail', 'studentEmail', 'teacherEmails', 'status', 'updatedAt'])
+        );
+      allow delete: if isVerifiedUser() && isValidId(studentId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /studentLocks/{lockId} {
+      allow get: if isVerifiedUser() && isValidId(lockId) && (
+        existing().ownerId == request.auth.uid ||
+        existing().studentEmail == authEmail() ||
+        isAdmin()
+      );
+      allow list: if isVerifiedUser() && (
+        resource.data.ownerId == request.auth.uid ||
+        resource.data.studentEmail == authEmail()
+      );
+      allow create: if isVerifiedUser()
+        && isValidId(lockId)
+        && isValidStudentLock(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && ownsExistingSchool(incoming().schoolId);
+      allow update: if isVerifiedUser()
+        && isValidId(lockId)
+        && isValidStudentLock(incoming())
+        && (existing().ownerId == request.auth.uid || isAdmin())
+        && incoming().ownerId == existing().ownerId
+        && incoming().schoolId == existing().schoolId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['studentId', 'studentEmail', 'updatedAt'])
+        );
+      allow delete: if isVerifiedUser() && isValidId(lockId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /subjects/{subjectId} {
+      allow get: if isVerifiedUser() && isValidId(subjectId) && (
+        existing().ownerId == request.auth.uid ||
+        ('memberEmails' in existing() && authEmail() in existing().memberEmails) ||
+        isMemberByDocId(existing().schoolId) ||
+        isAdmin()
+      );
+      allow list: if isVerifiedUser() && (
+        resource.data.ownerId == request.auth.uid ||
+        ('memberEmails' in resource.data && authEmail() in resource.data.memberEmails)
+      );
+      allow create: if isVerifiedUser()
+        && isValidId(subjectId)
+        && isValidSubject(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && ownsExistingSchool(incoming().schoolId);
+      allow update: if isVerifiedUser()
+        && isValidId(subjectId)
+        && isValidSubject(incoming())
+        && (existing().ownerId == request.auth.uid || isAdmin())
+        && incoming().ownerId == existing().ownerId
+        && incoming().schoolId == existing().schoolId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'cycle', 'coef', 'teacherName', 'memberEmails', 'updatedAt'])
+        );
+      allow delete: if isVerifiedUser() && isValidId(subjectId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /grades/{gradeId} {
+      allow get: if isVerifiedUser() && isValidId(gradeId) && (
+        existing().ownerId == request.auth.uid ||
+        ('parentEmail' in existing() && existing().parentEmail == authEmail()) ||
+        (!isStudentLockedInSchool(existing().schoolId) && 'teacherEmails' in existing() && authEmail() in existing().teacherEmails) ||
+        isAdmin()
+      );
+      allow list: if isVerifiedUser() && (
+        resource.data.ownerId == request.auth.uid ||
+        ('parentEmail' in resource.data && resource.data.parentEmail == authEmail()) ||
+        ('teacherEmails' in resource.data && authEmail() in resource.data.teacherEmails)
+      );
+      allow create: if isVerifiedUser()
+        && isValidId(gradeId)
+        && isValidGrade(incoming())
+        && (
+          incoming().ownerId == request.auth.uid ||
+          (
+            !isStudentLockedInSchool(incoming().schoolId) &&
+            ('teacherEmails' in incoming() && authEmail() in incoming().teacherEmails) &&
+            studentParentEmailMatches(incoming().studentId, incoming())
+          )
+        )
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && validStudentForWrite(incoming().studentId, incoming().schoolId, incoming().ownerId);
+      allow update: if isVerifiedUser()
+        && isValidId(gradeId)
+        && isValidGrade(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().schoolId == existing().schoolId
+        && incoming().studentId == existing().studentId
+        && incoming().subjectId == existing().subjectId
+        && incoming().trimester == existing().trimester
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (
+            (existing().ownerId == request.auth.uid || isAdmin()) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['classe', 'subjectName', 'coef', 'int1', 'int2', 'devoir', 'compo', 'appreciation', 'parentEmail', 'teacherEmails', 'updatedAt'])
+          ) ||
+          (
+            !isStudentLockedInSchool(existing().schoolId) &&
+            ('teacherEmails' in existing() && authEmail() in existing().teacherEmails) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['int1', 'int2', 'devoir', 'compo', 'appreciation', 'updatedAt'])
+          )
+        );
+      allow delete: if isVerifiedUser() && isValidId(gradeId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /bulletinRemarks/{remarkId} {
+      allow get: if isVerifiedUser() && isValidId(remarkId) && (
+        existing().ownerId == request.auth.uid ||
+        ('parentEmail' in existing() && existing().parentEmail == authEmail()) ||
+        (!isStudentLockedInSchool(existing().schoolId) && 'teacherEmails' in existing() && authEmail() in existing().teacherEmails) ||
+        isAdmin()
+      );
+      allow list: if isVerifiedUser() && (
+        resource.data.ownerId == request.auth.uid ||
+        ('parentEmail' in resource.data && resource.data.parentEmail == authEmail()) ||
+        ('teacherEmails' in resource.data && authEmail() in resource.data.teacherEmails)
+      );
+      allow create: if isVerifiedUser()
+        && isValidId(remarkId)
+        && isValidBulletinRemark(incoming())
+        && (
+          incoming().ownerId == request.auth.uid ||
+          (
+            !isStudentLockedInSchool(incoming().schoolId) &&
+            ('teacherEmails' in incoming() && authEmail() in incoming().teacherEmails) &&
+            studentParentEmailMatches(incoming().studentId, incoming())
+          )
+        )
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && validStudentForWrite(incoming().studentId, incoming().schoolId, incoming().ownerId);
+      allow update: if isVerifiedUser()
+        && isValidId(remarkId)
+        && isValidBulletinRemark(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().schoolId == existing().schoolId
+        && incoming().studentId == existing().studentId
+        && incoming().trimester == existing().trimester
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (
+            (existing().ownerId == request.auth.uid || isAdmin()) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['absences', 'conduite', 'decision', 'generalRemark', 'parentEmail', 'teacherEmails', 'updatedAt'])
+          ) ||
+          (
+            !isStudentLockedInSchool(existing().schoolId) &&
+            ('teacherEmails' in existing() && authEmail() in existing().teacherEmails) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['absences', 'conduite', 'decision', 'generalRemark', 'updatedAt'])
+          )
+        );
+      allow delete: if isVerifiedUser() && isValidId(remarkId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /messages/{messageId} {
+      allow get: if isVerifiedUser() && isValidId(messageId) && (
+        existing().ownerId == request.auth.uid ||
+        existing().senderEmail == authEmail() ||
+        existing().recipientEmail == authEmail() ||
+        isAdmin()
+      );
+      allow list: if isVerifiedUser() && (
+        resource.data.ownerId == request.auth.uid ||
+        resource.data.senderEmail == authEmail() ||
+        resource.data.recipientEmail == authEmail()
+      );
+      allow create: if isVerifiedUser()
+        && isValidId(messageId)
+        && isValidMessage(incoming())
+        && incoming().senderUid == request.auth.uid
+        && incoming().senderEmail == authEmail()
+        && incoming().read == false
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && canWriteInSchool(incoming().schoolId, incoming().ownerId)
+        && (
+          incoming().senderRole == 'parent' ||
+          (incoming().senderRole == 'teacher' && canStaffWriteInSchool(incoming().schoolId, incoming().ownerId)) ||
+          (incoming().senderRole == 'admin' && (incoming().ownerId == request.auth.uid || isAdmin()))
+        );
+      allow update: if isVerifiedUser()
+        && isValidId(messageId)
+        && isValidMessage(incoming())
+        && (
+          existing().ownerId == request.auth.uid ||
+          existing().recipientEmail == authEmail() ||
+          isAdmin()
+        )
+        && incoming().ownerId == existing().ownerId
+        && incoming().schoolId == existing().schoolId
+        && incoming().senderUid == existing().senderUid
+        && incoming().senderEmail == existing().senderEmail
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['read', 'updatedAt'])
+        );
+      allow delete: if isVerifiedUser() && isValidId(messageId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /notifications/{notificationId} {
+      allow get: if isVerifiedUser() && isValidId(notificationId) && (
+        existing().ownerId == request.auth.uid ||
+        authEmail() in existing().audienceEmails ||
+        isAdmin()
+      );
+      allow list: if isVerifiedUser() && (
+        resource.data.ownerId == request.auth.uid ||
+        authEmail() in resource.data.audienceEmails
+      );
+      allow create: if isVerifiedUser()
+        && isValidId(notificationId)
+        && isValidNotification(incoming())
+        && incoming().createdByEmail == authEmail()
+        && incoming().read == false
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && canStaffWriteInSchool(incoming().schoolId, incoming().ownerId);
+      allow update: if isVerifiedUser()
+        && isValidId(notificationId)
+        && isValidNotification(incoming())
+        && (
+          existing().ownerId == request.auth.uid ||
+          authEmail() in existing().audienceEmails ||
+          isAdmin()
+        )
+        && incoming().ownerId == existing().ownerId
+        && incoming().schoolId == existing().schoolId
+        && incoming().createdByEmail == existing().createdByEmail
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['read', 'updatedAt'])
+        );
+      allow delete: if isVerifiedUser() && isValidId(notificationId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /auditLogs/{logId} {
+      allow get: if isVerifiedUser() && isValidId(logId) && (
+        existing().ownerId == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isVerifiedUser() && (
+        resource.data.ownerId == request.auth.uid
+      );
+      allow create: if isVerifiedUser()
+        && isValidId(logId)
+        && isValidAuditLog(incoming())
+        && incoming().actorUid == request.auth.uid
+        && incoming().actorEmail == authEmail()
+        && incoming().createdAt == request.time
+        && canWriteInSchool(incoming().schoolId, incoming().ownerId)
+        && (
+          incoming().actorRole == 'parent' ||
+          (incoming().actorRole == 'teacher' && canStaffWriteInSchool(incoming().schoolId, incoming().ownerId)) ||
+          (incoming().actorRole == 'admin' && (incoming().ownerId == request.auth.uid || isAdmin()))
+        );
+      allow update, delete: if false;
+    }
+  }
+}
