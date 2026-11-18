@@ -1,4 +1,5 @@
-const { app, BrowserWindow, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const crypto = require('crypto');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -22,6 +23,20 @@ const MIME_TYPES = {
 };
 
 let staticServer = null;
+let mainWindow = null;
+let boundBaseUrl = '';
+const desktopAuthNonce = crypto.randomBytes(24).toString('hex');
+
+function getCleanChromeUserAgent(rawUa) {
+  const fallback =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+  if (!rawUa || typeof rawUa !== 'string') return fallback;
+  const cleaned = rawUa
+    .replace(/\s*Electron\/[^\s]+/gi, '')
+    .replace(/\s*schoolaria\/[^\s]+/gi, '')
+    .trim();
+  return cleaned || fallback;
+}
 
 function isAuthOrInternalUrl(url) {
   if (!url) return false;
@@ -33,17 +48,92 @@ function isAuthOrInternalUrl(url) {
     url.includes('accounts.google.com') ||
     url.includes('accounts.youtube.com') ||
     url.includes('.google.com') ||
+    url.includes('gstatic.com') ||
     url.includes('firebaseapp.com') ||
     url.includes('web.app') ||
     url.includes('apis.google.com')
   );
 }
 
+function readJsonBody(req, maxBytes = 65536) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let total = 0;
+    req.on('data', (chunk) => {
+      total += chunk.length;
+      if (total > maxBytes) {
+        reject(new Error('Payload too large'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      try {
+        const raw = Buffer.concat(chunks).toString('utf8');
+        resolve(raw ? JSON.parse(raw) : {});
+      } catch (err) {
+        reject(err);
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
 function startLocalDistServer(distDir) {
   const resolvedDistDir = path.resolve(distDir);
   return new Promise((resolve, reject) => {
-    const server = http.createServer((req, res) => {
+    const server = http.createServer(async (req, res) => {
       const reqUrl = (req.url || '/').split('?')[0];
+
+      if (reqUrl === '/__desktop_auth_callback') {
+        if (req.method === 'OPTIONS') {
+          res.writeHead(204);
+          res.end();
+          return;
+        }
+        if (req.method !== 'POST') {
+          res.writeHead(405, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Method not allowed' }));
+          return;
+        }
+        try {
+          const body = await readJsonBody(req);
+          if (
+            !body ||
+            typeof body.nonce !== 'string' ||
+            body.nonce !== desktopAuthNonce
+          ) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Invalid auth session nonce' }));
+            return;
+          }
+          const idToken = typeof body.idToken === 'string' && body.idToken ? body.idToken : null;
+          const accessToken =
+            typeof body.accessToken === 'string' && body.accessToken ? body.accessToken : null;
+          if (!idToken && !accessToken) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Missing Google credential token' }));
+            return;
+          }
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.show();
+            mainWindow.focus();
+            mainWindow.webContents.send('schoolaria:desktop-auth-token', {
+              idToken,
+              accessToken,
+            });
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid callback payload' }));
+        }
+        return;
+      }
+
       let decodedPath = reqUrl;
       try {
         decodedPath = decodeURIComponent(reqUrl);
@@ -100,7 +190,8 @@ function startLocalDistServer(distDir) {
         const addr = server.address();
         const boundPort = typeof addr === 'object' && addr ? addr.port : port;
         staticServer = server;
-        resolve(`http://localhost:${boundPort}`);
+        boundBaseUrl = `http://localhost:${boundPort}`;
+        resolve(boundBaseUrl);
       });
     }
 
@@ -109,6 +200,9 @@ function startLocalDistServer(distDir) {
 }
 
 async function createWindow() {
+  const cleanUa = getCleanChromeUserAgent(app.userAgentFallback);
+  app.userAgentFallback = cleanUa;
+
   const win = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -124,6 +218,9 @@ async function createWindow() {
       sandbox: false,
     },
   });
+
+  mainWindow = win;
+  win.webContents.setUserAgent(cleanUa);
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isAuthOrInternalUrl(url)) {
@@ -144,34 +241,60 @@ async function createWindow() {
     return { action: 'deny' };
   });
 
+  win.webContents.on('did-create-window', (childWin) => {
+    childWin.webContents.setUserAgent(cleanUa);
+  });
+
   const targetUrl = process.env.SCHOOLARIA_DESKTOP_URL;
   if (targetUrl) {
+    boundBaseUrl = targetUrl.replace(/\/+$/, '');
     await win.loadURL(targetUrl);
     return;
   }
 
-  // Serve dist/ on http://localhost:<port> instead of file:// so Firebase Auth
-  // (which rejects file:// with auth/unauthorized-domain) works natively.
   const distDir = path.resolve(__dirname, '../dist');
   const localUrl = await startLocalDistServer(distDir);
   await win.loadURL(localUrl);
 }
 
-app.whenReady().then(() => {
-  void createWindow();
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      void createWindow();
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
     }
   });
-});
 
-app.on('window-all-closed', () => {
-  if (staticServer) {
-    staticServer.close();
-    staticServer = null;
-  }
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
+  ipcMain.handle('schoolaria:start-browser-auth', async () => {
+    if (!boundBaseUrl) {
+      throw new Error('Serveur local desktop non prêt.');
+    }
+    const authUrl = `${boundBaseUrl}/?desktopAuth=1&nonce=${encodeURIComponent(desktopAuthNonce)}`;
+    await shell.openExternal(authUrl);
+    return { opened: true };
+  });
+
+  app.whenReady().then(() => {
+    app.userAgentFallback = getCleanChromeUserAgent(app.userAgentFallback);
+    void createWindow();
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        void createWindow();
+      }
+    });
+  });
+
+  app.on('window-all-closed', () => {
+    if (staticServer) {
+      staticServer.close();
+      staticServer = null;
+    }
+    if (process.platform !== 'darwin') {
+      app.quit();
+    }
+  });
+}

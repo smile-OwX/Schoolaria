@@ -301,6 +301,43 @@ export async function signInWithGoogle() {
   }
 }
 
+export async function completeDesktopBrowserPopup(): Promise<{
+  idToken: string | null;
+  accessToken: string | null;
+  email: string;
+}> {
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+    const cred = GoogleAuthProvider.credentialFromResult(result);
+    const idToken = cred?.idToken || null;
+    const accessToken = cred?.accessToken || null;
+    if (!idToken && !accessToken) {
+      throw new Error('Impossible de récupérer les identifiants OAuth Google.');
+    }
+    return {
+      idToken,
+      accessToken,
+      email: result.user.email || '',
+    };
+  } catch (err: unknown) {
+    throw new Error(formatFirebaseAuthError(err));
+  }
+}
+
+export async function signInWithDesktopToken(
+  idToken: string | null,
+  accessToken: string | null
+) {
+  if (!idToken && !accessToken) {
+    throw new Error('Jeton Google manquant pour la connexion desktop.');
+  }
+  const credential = GoogleAuthProvider.credential(
+    idToken || undefined,
+    accessToken || undefined
+  );
+  return signInWithCredential(auth, credential);
+}
+
 export async function signOutUser() {
   if (isCapacitorNative()) {
     await FirebaseAuthentication.signOut().catch(() => {});

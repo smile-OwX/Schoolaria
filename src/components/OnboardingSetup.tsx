@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   Building2,
@@ -10,8 +10,16 @@ import {
   Server,
   CheckCircle2,
   Globe,
+  ExternalLink,
 } from 'lucide-react';
-import { formatFirebaseAuthError, isCompiledShell, signInWithGoogle } from '../lib/firebase.ts';
+import {
+  completeDesktopBrowserPopup,
+  formatFirebaseAuthError,
+  isCompiledShell,
+  isElectronDesktop,
+  signInWithDesktopToken,
+  signInWithGoogle,
+} from '../lib/firebase.ts';
 import {
   getApiBaseUrl,
   getSavedApiBaseUrl,
@@ -21,21 +29,149 @@ import { SchoolProfile } from '../types/school.ts';
 import { PWAInstallButton } from './PWAInstallBanner.tsx';
 import { usePWAInstall } from '../hooks/usePWAInstall.ts';
 
+interface DesktopBridgeWindow extends Window {
+  schoolariaDesktop?: {
+    platform?: string;
+    startSystemBrowserAuth?: () => Promise<{ opened: boolean }>;
+    onDesktopAuthToken?: (
+      cb: (payload: { idToken: string | null; accessToken: string | null }) => void
+    ) => () => void;
+  };
+}
+
 interface AuthGateProps {
   onSuccess?: () => void;
 }
 
+export function DesktopBrowserAuthBridge({ nonce }: { nonce: string }) {
+  const [loading, setLoading] = useState(false);
+  const [doneEmail, setDoneEmail] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleAuthorize = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { idToken, accessToken, email } = await completeDesktopBrowserPopup();
+      const resp = await fetch('/__desktop_auth_callback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nonce, idToken, accessToken }),
+      });
+      if (!resp.ok) {
+        const errData = (await resp.json().catch(() => ({}))) as { error?: string };
+        throw new Error(
+          errData.error || "Impossible de renvoyer la session vers l'application Schoolaria PC."
+        );
+      }
+      setDoneEmail(email || 'votre compte Google');
+      setTimeout(() => {
+        try {
+          window.close();
+        } catch {
+          // Ignore browser tab close restrictions
+        }
+      }, 1200);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : formatFirebaseAuthError(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-6 relative z-10">
+      <div className="max-w-md w-full bg-white/95 backdrop-blur-xs border border-violet-300/80 rounded-2xl overflow-hidden shadow-xl">
+        <div className="bg-gradient-to-r from-violet-950 via-violet-800 to-indigo-900 text-white p-6 flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-white text-violet-900 flex items-center justify-center shrink-0">
+            <GraduationCap className="w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="text-xl font-extrabold text-white">Schoolaria PC</h1>
+            <p className="text-xs text-violet-200">Validation sécurisée du compte Google</p>
+          </div>
+        </div>
+
+        <div className="p-8">
+          {doneEmail ? (
+            <div className="text-center space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center mx-auto">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <h2 className="text-lg font-bold text-violet-950">Connexion réussie !</h2>
+              <p className="text-sm text-zinc-600">
+                Session validée pour <strong>{doneEmail}</strong>. Vous pouvez fermer cet onglet et retourner dans l’application <strong>Schoolaria PC</strong>.
+              </p>
+            </div>
+          ) : (
+            <>
+              <h2 className="text-lg font-bold text-violet-950 mb-2">
+                Finaliser la connexion PC
+              </h2>
+              <p className="text-sm text-zinc-600 leading-relaxed mb-6">
+                Sélectionnez votre compte Google dans votre navigateur pour connecter instantanément l’application bureau Schoolaria.
+              </p>
+
+              {error && (
+                <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 leading-relaxed">
+                  {error}
+                </div>
+              )}
+
+              <button
+                onClick={handleAuthorize}
+                disabled={loading}
+                className="w-full flex items-center justify-center gap-3 px-4 py-3 bg-violet-700 hover:bg-violet-800 text-white rounded-xl text-sm font-semibold transition-all shadow-xs disabled:opacity-60"
+              >
+                {loading ? 'Validation Google en cours...' : 'Choisir mon compte Google'}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AuthGate({ onSuccess }: AuthGateProps) {
   const [loading, setLoading] = useState(false);
+  const [browserNotice, setBrowserNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const compiledShell = isCompiledShell();
+  const isDesktopApp = isElectronDesktop();
+  const desktopBridge =
+    typeof window !== 'undefined'
+      ? (window as DesktopBridgeWindow).schoolariaDesktop
+      : undefined;
+  const hasSystemBrowserAuth =
+    isDesktopApp && typeof desktopBridge?.startSystemBrowserAuth === 'function';
+
   const [showServerConfig, setShowServerConfig] = useState(false);
   const [serverUrlInput, setServerUrlInput] = useState(() => getSavedApiBaseUrl());
   const [serverSaved, setServerSaved] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!desktopBridge?.onDesktopAuthToken) return;
+    const unsub = desktopBridge.onDesktopAuthToken(async ({ idToken, accessToken }) => {
+      setLoading(true);
+      setError(null);
+      setBrowserNotice(null);
+      try {
+        await signInWithDesktopToken(idToken, accessToken);
+        onSuccess?.();
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : formatFirebaseAuthError(err));
+      } finally {
+        setLoading(false);
+      }
+    });
+    return () => unsub();
+  }, [desktopBridge, onSuccess]);
+
   const handleGoogleLogin = async () => {
     setLoading(true);
     setError(null);
+    setBrowserNotice(null);
     try {
       await signInWithGoogle();
       onSuccess?.();
@@ -43,6 +179,24 @@ export function AuthGate({ onSuccess }: AuthGateProps) {
       setError(err instanceof Error ? err.message : formatFirebaseAuthError(err));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSystemBrowserLogin = async () => {
+    if (!desktopBridge?.startSystemBrowserAuth) return;
+    setError(null);
+    setBrowserNotice(
+      'Navigateur ouvert : choisissez votre compte Google dans Chrome ou Edge puis revenez dans Schoolaria.'
+    );
+    try {
+      await desktopBridge.startSystemBrowserAuth();
+    } catch (err: unknown) {
+      setBrowserNotice(null);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Impossible d'ouvrir votre navigateur par défaut."
+      );
     }
   };
 
@@ -88,6 +242,12 @@ export function AuthGate({ onSuccess }: AuthGateProps) {
             </div>
           )}
 
+          {browserNotice && (
+            <div className="mb-4 p-3 rounded-xl bg-violet-50 border border-violet-200 text-xs text-violet-800 leading-relaxed">
+              {browserNotice}
+            </div>
+          )}
+
           <button
             onClick={handleGoogleLogin}
             disabled={loading}
@@ -101,6 +261,18 @@ export function AuthGate({ onSuccess }: AuthGateProps) {
             </svg>
             {loading ? 'Connexion en cours...' : 'Continuer avec Google'}
           </button>
+
+          {hasSystemBrowserAuth && (
+            <button
+              type="button"
+              onClick={handleSystemBrowserLogin}
+              disabled={loading}
+              className="mt-2.5 w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-violet-50 hover:bg-violet-100 border border-violet-200 rounded-xl text-xs font-semibold text-violet-900 transition-colors disabled:opacity-60"
+            >
+              <ExternalLink className="w-3.5 h-3.5 text-violet-700" />
+              Se connecter via Chrome / Edge (Recommandé sur PC)
+            </button>
+          )}
 
           {compiledShell && (
             <div className="mt-4">

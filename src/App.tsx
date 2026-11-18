@@ -60,7 +60,11 @@ import {
 } from './types/school.ts';
 import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 import { SplashScreen } from './components/SplashScreen.tsx';
-import { AuthGate, SchoolSetupForm } from './components/OnboardingSetup.tsx';
+import {
+  AuthGate,
+  DesktopBrowserAuthBridge,
+  SchoolSetupForm,
+} from './components/OnboardingSetup.tsx';
 import { FloatingAcademicBackdrop } from './components/FloatingAcademicBackdrop.tsx';
 import {
   ActiveTab,
@@ -1149,10 +1153,26 @@ function AppShell() {
 }
 
 export default function App() {
+  const desktopAuthNonce = useMemo(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('desktopAuth') === '1') {
+      return params.get('nonce') || '';
+    }
+    return null;
+  }, []);
+
   return (
     <ErrorBoundary>
       <MotionConfig reducedMotion="user">
-        <AppShell />
+        {desktopAuthNonce ? (
+          <div className="relative min-h-screen">
+            <FloatingAcademicBackdrop />
+            <DesktopBrowserAuthBridge nonce={desktopAuthNonce} />
+          </div>
+        ) : (
+          <AppShell />
+        )}
       </MotionConfig>
     </ErrorBoundary>
   );
