@@ -1,0 +1,198 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-display: 'Plus Jakarta Sans', system-ui, sans-serif;
+    --font-body: 'DM Sans', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  html,
+  body {
+    font-family: var(--font-body);
+    background: linear-gradient(135deg, #d8ccff 0%, #ede9fe 42%, #ddd6fe 100%);
+    color: #1e1038;
+    min-height: 100vh;
+    max-width: 100%;
+    overflow-x: clip;
+  }
+
+  h1, h2, h3, h4, .font-display {
+    font-family: var(--font-display);
+  }
+
+  .font-mono-nums {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@keyframes academicFloatSlow {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  33% {
+    transform: translate3d(12px, -18px, 0) rotate(4deg);
+  }
+  66% {
+    transform: translate3d(-10px, 12px, 0) rotate(-3deg);
+  }
+}
+
+@keyframes academicFloatReverse {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  50% {
+    transform: translate3d(-14px, 16px, 0) rotate(-5deg);
+  }
+}
+
+.animate-academic-float {
+  animation: academicFloatSlow 16s ease-in-out infinite;
+}
+
+.animate-academic-float-reverse {
+  animation: academicFloatReverse 20s ease-in-out infinite;
+}
+
+/* Google Material 3 Expressive — Ink Ripple & Tactile Physics */
+@keyframes m3RippleExpand {
+  0% {
+    transform: scale(0);
+    opacity: 0.42;
+  }
+  70% {
+    opacity: 0.2;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+.m3-ripple-host {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.m3-ripple-wave {
+  position: absolute;
+  border-radius: 9999px;
+  transform: scale(0);
+  pointer-events: none;
+  animation: m3RippleExpand 540ms cubic-bezier(0.05, 0.7, 0.1, 1) forwards;
+}
+
+.m3-ripple-violet {
+  background: radial-gradient(circle, rgba(109, 40, 217, 0.24) 0%, rgba(124, 58, 237, 0.1) 62%, transparent 100%);
+}
+
+.m3-ripple-light {
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.36) 0%, rgba(237, 233, 254, 0.15) 62%, transparent 100%);
+}
+
+button,
+[role="button"] {
+  transition: transform 170ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 180ms cubic-bezier(0.05, 0.7, 0.1, 1),
+    border-color 180ms cubic-bezier(0.05, 0.7, 0.1, 1),
+    box-shadow 200ms cubic-bezier(0.05, 0.7, 0.1, 1),
+    color 160ms ease;
+}
+
+button:active:not(:disabled),
+[role="button"]:active:not([aria-disabled="true"]) {
+  transform: scale(0.968);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-academic-float,
+  .animate-academic-float-reverse,
+  .m3-ripple-wave {
+    animation: none !important;
+  }
+  button:active:not(:disabled),
+  [role="button"]:active:not([aria-disabled="true"]) {
+    transform: none !important;
+  }
+}
+
+/* Custom Range Slider (Slidebar for Age in Inscription) */
+input[type="range"].violet-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 999px;
+  background: #ede9fe;
+  outline: none;
+}
+
+input[type="range"].violet-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #6d28d9;
+  border: 3px solid #ffffff;
+  box-shadow: 0 2px 6px rgba(109, 40, 217, 0.35);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+input[type="range"].violet-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.12);
+}
+
+input[type="range"].violet-slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #6d28d9;
+  border: 3px solid #ffffff;
+  box-shadow: 0 2px 6px rgba(109, 40, 217, 0.35);
+  cursor: pointer;
+}
+
+/* Print Styles for Bulletins & Class Lists */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  .print-bulletin-page {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    break-after: page;
+    page-break-after: always;
+  }
+
+  .print-bulletin-page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+}

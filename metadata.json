@@ -1,0 +1,6 @@
+{
+  "name": "Scholarship Make It",
+  "description": "Système complet de gestion scolaire : inscriptions, listes de classes par cycle, suivi des notes, bulletins scolaires PDF et statistiques.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
