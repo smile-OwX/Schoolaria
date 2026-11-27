@@ -9,7 +9,15 @@ import {
 } from './apiUrl.ts';
 import { formatFirebaseAuthErrorDetails } from './authErrors.ts';
 import { filterChildrenForParent } from './parentHelpers.ts';
-import { computeMoyClasse, computeMoyMatiere, parseTogoClassProfile } from '../types/school.ts';
+import {
+  buildFixedSubjectsPreviewForClass,
+  computeMoyClasse,
+  computeMoyMatiere,
+  computeNotificationExpiresAt,
+  isNotificationExpired,
+  isNotificationVisibleForUser,
+  parseTogoClassProfile,
+} from '../types/school.ts';
 import type { Membership, Student } from '../types/school.ts';
 
 test('normalizeBaseUrl normalizes Vercel URLs and rejects invalid schemes', () => {
@@ -193,4 +201,116 @@ test('computeMoyClasse and computeMoyMatiere follow Togo official weighted formu
   assert.equal(moyCl, 14);
   const moyMat = computeMoyMatiere({ int1: 14, int2: 16, devoir: 13, compo: 17 });
   assert.equal(moyMat, 16);
+});
+
+test('filterChildrenForParent attaches parent automatically via guardianPhone when parentEmail is empty', () => {
+  const students: Student[] = [
+    {
+      id: 'stu_phone_1',
+      ownerId: 'u1',
+      schoolId: 's1',
+      matricule: 'M10',
+      nom: 'MENSAH',
+      prenoms: 'Yao',
+      sexe: 'M',
+      age: 14,
+      cycle: 'Collège',
+      classe: '4ème A',
+      guardianPhone: '+228 90 12 34 56',
+      parentEmail: '',
+      status: 'actif',
+    },
+  ];
+
+  const matched = filterChildrenForParent({
+    students,
+    activeMembership: null,
+    parentEmail: 'tel.22890123456@tel.schoolaria.app',
+    isPreview: false,
+    activeOnly: true,
+  });
+  assert.equal(matched.length, 1);
+  assert.equal(matched[0].id, 'stu_phone_1');
+
+  const matchedRawPhone = filterChildrenForParent({
+    students,
+    activeMembership: null,
+    parentEmail: '90 12 34 56',
+    isPreview: false,
+    activeOnly: true,
+  });
+  assert.equal(matchedRawPhone.length, 1);
+  assert.equal(matchedRawPhone[0].id, 'stu_phone_1');
+});
+
+test('notification expiration and dismissal helpers filter expired and user-dismissed entries', () => {
+  const baseNow = Date.UTC(2026, 10, 1, 10, 0, 0);
+  assert.equal(computeNotificationExpiresAt('permanent', baseNow), null);
+
+  const exp24h = computeNotificationExpiresAt('24h', baseNow)!;
+  assert.equal(exp24h.getTime() - baseNow, 24 * 60 * 60 * 1000);
+
+  assert.equal(isNotificationExpired({ expiresAt: null }, baseNow), false);
+  assert.equal(isNotificationExpired({ expiresAt: exp24h }, baseNow + 1000), false);
+  assert.equal(isNotificationExpired({ expiresAt: exp24h }, exp24h.getTime()), true);
+  assert.equal(isNotificationExpired({ expiresAt: exp24h }, exp24h.getTime() + 1000), true);
+
+  assert.equal(
+    isNotificationVisibleForUser(
+      { expiresAt: exp24h, dismissedByEmails: ['parent.a@exemple.com'] },
+      'parent.b@exemple.com',
+      baseNow + 1000
+    ),
+    true
+  );
+  assert.equal(
+    isNotificationVisibleForUser(
+      { expiresAt: exp24h, dismissedByEmails: ['parent.a@exemple.com'] },
+      'parent.a@exemple.com',
+      baseNow + 1000
+    ),
+    false
+  );
+  assert.equal(
+    isNotificationVisibleForUser(
+      { expiresAt: exp24h, dismissedByEmails: [] },
+      'parent.b@exemple.com',
+      exp24h.getTime() + 5000
+    ),
+    false
+  );
+});
+
+test('parseTogoClassProfile and buildFixedSubjectsPreviewForClass apply fixed official coefficients for multiple classes', () => {
+  assert.deepEqual(parseTogoClassProfile('6e A'), { cycle: 'Collège', level: '6e', series: null });
+  assert.deepEqual(parseTogoClassProfile('5e'), { cycle: 'Collège', level: '5e', series: null });
+  assert.deepEqual(parseTogoClassProfile('4e'), { cycle: 'Collège', level: '4e', series: null });
+  assert.deepEqual(parseTogoClassProfile('3e'), { cycle: 'Collège', level: '3e', series: null });
+  assert.deepEqual(parseTogoClassProfile('2nde A'), { cycle: 'Lycée', level: '2nde', series: 'A' });
+  assert.deepEqual(parseTogoClassProfile('1re D2'), { cycle: 'Lycée', level: '1re', series: 'D' });
+  assert.deepEqual(parseTogoClassProfile('Tle C1'), { cycle: 'Lycée', level: 'Tle', series: 'C' });
+
+  const sixthSubjects = buildFixedSubjectsPreviewForClass('6e B', []);
+  assert.ok(sixthSubjects.length >= 9);
+  assert.equal(sixthSubjects.every((s) => s.coef === 1), true);
+
+  const thirdSubjects = buildFixedSubjectsPreviewForClass('3e', []);
+  const thirdMap = Object.fromEntries(thirdSubjects.map((s) => [s.name, s.coef]));
+  assert.equal(thirdMap['Mathématiques'], 3);
+  assert.equal(thirdMap['Français'], 3);
+
+  const tleCSubjects = buildFixedSubjectsPreviewForClass('Tle C', []);
+  const tleCMap = Object.fromEntries(tleCSubjects.map((s) => [s.name, s.coef]));
+  assert.equal(tleCMap['Mathématiques'], 5);
+  assert.equal(tleCMap['Physique-Chimie'], 4);
+
+  const firstDSubjects = buildFixedSubjectsPreviewForClass('1re D', []);
+  const firstDMap = Object.fromEntries(firstDSubjects.map((s) => [s.name, s.coef]));
+  assert.equal(firstDMap['SVT'], 4);
+  assert.equal(firstDMap['Mathématiques'], 3);
+
+  const tleASubjects = buildFixedSubjectsPreviewForClass('Tle A4', []);
+  const tleAMap = Object.fromEntries(tleASubjects.map((s) => [s.name, s.coef]));
+  assert.equal(tleAMap['Philosophie'], 4);
+  assert.equal(tleAMap['Français'], 3);
 });

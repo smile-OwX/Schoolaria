@@ -29,6 +29,8 @@ import {
   SchoolProfile,
   Student,
   Subject,
+  UserRole,
+  canNotifyParents,
   computeMoyClasse,
   computeMoyMatiere,
   getAutoAppreciation,
@@ -43,10 +45,12 @@ import {
   createNotification,
   createStudent,
   createSubject,
+  deleteClassroomCascade,
   deleteSubjectById,
   updateClassroomTitulaire,
   upsertGrade,
 } from '../lib/schoolService.ts';
+import { ConfirmModal } from './ConfirmModal.tsx';
 import { getAuthHeaders } from '../lib/firebase.ts';
 import { apiFetch } from '../lib/apiClient.ts';
 
@@ -61,8 +65,10 @@ interface ClassRosterViewProps {
   ownerUid: string;
   actorEmail: string;
   actorName: string;
+  actorRole?: UserRole;
   canManageSchool?: boolean;
   canManageClasses?: boolean;
+  canScanEnrollments?: boolean;
   canEditGrades?: boolean;
   school: SchoolProfile;
   classe: string;
@@ -88,8 +94,10 @@ export function ClassRosterView({
   ownerUid,
   actorEmail,
   actorName,
+  actorRole = 'censeur',
   canManageSchool = true,
   canManageClasses,
+  canScanEnrollments,
   canEditGrades = true,
   school,
   classe,
@@ -103,6 +111,7 @@ export function ClassRosterView({
   onOpenBulletin,
 }: ClassRosterViewProps) {
   const allowTitulaireEdit = canManageClasses ?? canManageSchool;
+  const allowStudentScan = canScanEnrollments ?? canManageClasses ?? false;
   const teacherMemberships = useMemo(
     () => memberships.filter((m) => m.role === 'teacher').sort((a, b) => a.memberName.localeCompare(b.memberName)),
     [memberships]
@@ -162,6 +171,12 @@ export function ClassRosterView({
   const [titulaireName, setTitulaireName] = useState('');
   const [titulaireEmail, setTitulaireEmail] = useState('');
   const [savingTitulaire, setSavingTitulaire] = useState(false);
+
+  const [showDeleteClassModal, setShowDeleteClassModal] = useState(false);
+  const [deleteClassMode, setDeleteClassMode] = useState<'transfer' | 'delete-students'>('transfer');
+  const [transferTargetClass, setTransferTargetClass] = useState('');
+  const [deletingClass, setDeletingClass] = useState(false);
+  const [deleteClassError, setDeleteClassError] = useState<string | null>(null);
 
   const activeSubject = useMemo(
     () => cycleSubjects.find((s) => s.id === selectedSubjectId) ?? cycleSubjects[0] ?? null,
@@ -298,6 +313,7 @@ export function ClassRosterView({
         {
           email: actorEmail,
           name: actorName,
+          role: actorRole,
           studentName: `${student.nom} ${student.prenoms}`,
           moyMat: moy,
         }
@@ -309,7 +325,7 @@ export function ClassRosterView({
         return next;
       });
       setStatusMsg(
-        student.parentEmail
+        student.parentEmail && canNotifyParents(actorRole)
           ? `Notes enregistrées pour ${student.nom} ${student.prenoms} et notification envoyée au parent.`
           : `Notes enregistrées pour ${student.nom} ${student.prenoms}.`
       );
@@ -326,16 +342,40 @@ export function ClassRosterView({
     setNotifyingStudentId(student.id);
     setErrorMsg(null);
     try {
-      // Targeted privacy-safe audience: ONLY the student's parent + assigned class teachers + sender
-      const audience = Array.from(
-        new Set(
-          [
-            student.parentEmail ?? '',
-            ...(classroom?.teacherEmails ?? []),
-            actorEmail,
-          ].filter(Boolean)
-        )
-      );
+      let audience: string[];
+      let successFeedback = `Alerte d'absence envoyée pour ${student.nom} ${student.prenoms}.`;
+
+      if (actorRole === 'teacher') {
+        // Les professeurs n'envoient rien aux parents : signalement uniquement au Censeur et au Directeur
+        audience = Array.from(
+          new Set(
+            [
+              ...(school.censeurEmails ?? []),
+              ...(school.ownerEmail ? [school.ownerEmail] : []),
+            ].filter(Boolean)
+          )
+        );
+        if (audience.length === 0) {
+          setErrorMsg("Aucun compte Censeur ou Directeur n'est encore configuré pour recevoir le signalement.");
+          return;
+        }
+        successFeedback = `Absence de ${student.nom} ${student.prenoms} signalée au Censeur et au Directeur.`;
+      } else if (canNotifyParents(actorRole)) {
+        // Direction / Censeur : notification ciblée au parent + équipe pédagogique
+        audience = Array.from(
+          new Set(
+            [
+              student.parentEmail ?? '',
+              ...(classroom?.teacherEmails ?? []),
+              actorEmail,
+            ].filter(Boolean)
+          )
+        );
+      } else {
+        setErrorMsg("Votre rôle ne permet pas d'envoyer de signalement d'absence aux parents.");
+        return;
+      }
+
       await createNotification(ownerUid, school.id, {
         type: 'absence',
         title: `Absence signalée · ${student.nom} ${student.prenoms} (${classe})`,
@@ -345,8 +385,9 @@ export function ClassRosterView({
         audienceEmails: audience,
         createdByEmail: actorEmail,
         createdByName: actorName,
+        createdByRole: actorRole,
       });
-      setStatusMsg(`Alerte d'absence envoyée pour ${student.nom} ${student.prenoms}.`);
+      setStatusMsg(successFeedback);
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : "Erreur lors de l'envoi de la notification.");
     } finally {
@@ -646,6 +687,50 @@ export function ClassRosterView({
     }
   };
 
+  const allowClassDelete = Boolean(
+    (canManageClasses ?? canManageSchool) && classroom && !classroom.id.startsWith('fallback_')
+  );
+  const activeClassStudentsCount = useMemo(
+    () => students.filter((s) => s.classe === classe && s.status === 'actif').length,
+    [students, classe]
+  );
+  const otherClassrooms = useMemo(
+    () => classrooms.filter((c) => c.name !== classe && (!classroom || c.id !== classroom.id)),
+    [classrooms, classe, classroom]
+  );
+
+  const openDeleteClassModal = () => {
+    setDeleteClassError(null);
+    setTransferTargetClass(otherClassrooms[0]?.name ?? '');
+    setDeleteClassMode(otherClassrooms.length > 0 ? 'transfer' : 'delete-students');
+    setMenuOpen(false);
+    setShowDeleteClassModal(true);
+  };
+
+  const handleConfirmDeleteClass = async () => {
+    if (!classroom || !allowClassDelete) return;
+    const effectiveMode = activeClassStudentsCount === 0 ? 'delete-students' : deleteClassMode;
+    setDeletingClass(true);
+    setDeleteClassError(null);
+    try {
+      await deleteClassroomCascade(
+        ownerUid,
+        school.id,
+        classroom,
+        effectiveMode,
+        transferTargetClass
+      );
+      setShowDeleteClassModal(false);
+      onBack();
+    } catch (err: unknown) {
+      setDeleteClassError(
+        err instanceof Error ? err.message : 'Erreur lors de la suppression de la classe.'
+      );
+    } finally {
+      setDeletingClass(false);
+    }
+  };
+
   return (
     <div className="space-y-5">
       {/* Personalized Classroom Banner (especially distinct for Lycée classes) */}
@@ -772,30 +857,40 @@ export function ClassRosterView({
                   </button>
                 )}
                 {canManageSchool && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowSubjectsModal(true);
-                        setMenuOpen(false);
-                      }}
-                      className="w-full px-4 py-2.5 text-left hover:bg-violet-50 flex items-center gap-2.5 text-zinc-700 font-medium"
-                    >
-                      <BookOpen className="w-3.5 h-3.5 text-violet-600" />
-                      Gérer les matières ({cycle})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowScannerModal(true);
-                        setMenuOpen(false);
-                      }}
-                      className="w-full px-4 py-2.5 text-left hover:bg-violet-50 flex items-center gap-2.5 text-zinc-700 font-medium"
-                    >
-                      <Camera className="w-3.5 h-3.5 text-violet-600" />
-                      Numériser fiche papier (IA)
-                    </button>
-                  </>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSubjectsModal(true);
+                      setMenuOpen(false);
+                    }}
+                    className="w-full px-4 py-2.5 text-left hover:bg-violet-50 flex items-center gap-2.5 text-zinc-700 font-medium"
+                  >
+                    <BookOpen className="w-3.5 h-3.5 text-violet-600" />
+                    Gérer les matières ({cycle})
+                  </button>
+                )}
+                {allowStudentScan && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowScannerModal(true);
+                      setMenuOpen(false);
+                    }}
+                    className="w-full px-4 py-2.5 text-left hover:bg-violet-50 flex items-center gap-2.5 text-zinc-700 font-medium"
+                  >
+                    <Camera className="w-3.5 h-3.5 text-violet-600" />
+                    Numériser fiche papier (IA)
+                  </button>
+                )}
+                {allowClassDelete && (
+                  <button
+                    type="button"
+                    onClick={openDeleteClassModal}
+                    className="w-full px-4 py-2.5 text-left hover:bg-rose-50 flex items-center gap-2.5 text-rose-600 font-semibold border-t border-zinc-100 mt-1 pt-2.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                    Supprimer la classe
+                  </button>
                 )}
               </div>
               </>
@@ -1023,16 +1118,22 @@ export function ClassRosterView({
                             </button>
                           )}
 
-                          <button
-                            type="button"
-                            onClick={() => handleNotifyAbsence(student)}
-                            disabled={notifyingStudentId === student.id}
-                            title="Signaler une absence et notifier le parent"
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 text-[11px] font-semibold transition-colors"
-                          >
-                            <BellRing className="w-3 h-3" />
-                            Abs
-                          </button>
+                          {(canNotifyParents(actorRole) || actorRole === 'teacher') && (
+                            <button
+                              type="button"
+                              onClick={() => handleNotifyAbsence(student)}
+                              disabled={notifyingStudentId === student.id}
+                              title={
+                                actorRole === 'teacher'
+                                  ? 'Signaler une absence au Censeur et au Directeur'
+                                  : 'Signaler une absence et notifier le parent'
+                              }
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 text-[11px] font-semibold transition-colors"
+                            >
+                              <BellRing className="w-3 h-3" />
+                              Abs
+                            </button>
+                          )}
 
                           <button
                             type="button"
@@ -1324,6 +1425,68 @@ export function ClassRosterView({
         </div>,
         document.body
       )}
+
+      <ConfirmModal
+        open={showDeleteClassModal}
+        title={`Supprimer la classe « ${classe} » ?`}
+        description={
+          activeClassStudentsCount > 0
+            ? `Cette classe contient actuellement ${activeClassStudentsCount} élève(s). Choisissez comment traiter ces élèves avant de confirmer.`
+            : `Voulez-vous vraiment supprimer cette classe vide ? Cette action retirera la division de votre établissement.`
+        }
+        confirmLabel="Confirmer la suppression"
+        tone="danger"
+        loading={deletingClass}
+        error={deleteClassError}
+        onCancel={() => !deletingClass && setShowDeleteClassModal(false)}
+        onConfirm={handleConfirmDeleteClass}
+      >
+        {activeClassStudentsCount > 0 && (
+          <div className="space-y-2.5 bg-zinc-50 border border-zinc-200 rounded-xl p-3 text-xs">
+            {otherClassrooms.length > 0 && (
+              <>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="roster-class-delete-mode"
+                    checked={deleteClassMode === 'transfer'}
+                    onChange={() => setDeleteClassMode('transfer')}
+                    className="mt-0.5 text-violet-700"
+                  />
+                  <span className="font-semibold text-zinc-800">
+                    Transférer les élèves vers une autre classe
+                  </span>
+                </label>
+                {deleteClassMode === 'transfer' && (
+                  <select
+                    value={transferTargetClass}
+                    onChange={(e) => setTransferTargetClass(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-violet-200 bg-white text-xs font-bold text-violet-900 outline-none focus:border-violet-600"
+                  >
+                    {otherClassrooms.map((c) => (
+                      <option key={c.id} value={c.name}>
+                        {c.name} ({c.cycle})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </>
+            )}
+            <label className="flex items-start gap-2 cursor-pointer pt-1">
+              <input
+                type="radio"
+                name="roster-class-delete-mode"
+                checked={deleteClassMode === 'delete-students'}
+                onChange={() => setDeleteClassMode('delete-students')}
+                className="mt-0.5 text-rose-600"
+              />
+              <span className="font-semibold text-rose-700">
+                Supprimer la classe ainsi que ses élèves et notes
+              </span>
+            </label>
+          </div>
+        )}
+      </ConfirmModal>
     </div>
   );
 }

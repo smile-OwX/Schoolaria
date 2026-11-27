@@ -22,6 +22,7 @@ import {
 } from '../types/school.ts';
 import { getAuthHeaders } from '../lib/firebase.ts';
 import { apiFetch } from '../lib/apiClient.ts';
+import { formatAuthIdentifierForDisplay } from '../lib/phoneAuth.ts';
 import { recordAuditLog } from '../lib/schoolService.ts';
 
 interface AuditLogsViewProps {
@@ -590,7 +591,7 @@ export function AuditLogsView({ school, auditLogs }: AuditLogsViewProps) {
                       </div>
                       <p className="text-zinc-700 mt-1 break-words">{log.details}</p>
                       <p className="text-[11px] text-zinc-500 mt-1">
-                        Par <strong>{log.actorName}</strong> ({log.actorEmail} · rôle : {log.actorRole})
+                        Par <strong>{log.actorName}</strong> ({formatAuthIdentifierForDisplay(log.actorEmail)} · rôle : {log.actorRole})
                       </p>
                     </div>
                   </div>

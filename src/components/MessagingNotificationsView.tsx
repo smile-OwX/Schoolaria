@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Send,
   Mail,
@@ -9,25 +9,47 @@ import {
   Megaphone,
   Check,
   User,
+  ShieldCheck,
+  Trash2,
+  Clock,
 } from 'lucide-react';
 import {
   Classroom,
   Membership,
   MessageItem,
+  NOTIFICATION_DURATION_OPTIONS,
+  NotificationDurationPreset,
   NotificationItem,
+  ROLE_SHORT_LABELS,
   SchoolProfile,
   Student,
   UserRole,
   compareClassNames,
+  computeNotificationExpiresAt,
+  getTimestampMs,
+  isNotificationVisibleForUser,
   sortClassrooms,
 } from '../types/school.ts';
 import {
+  cleanupNotificationsBulk,
   createNotification,
+  deleteMessageById,
+  dismissOrDeleteNotification,
   markAllNotificationsRead,
   markMessageRead,
   markNotificationRead,
+  normalizeEmail,
   sendMessage,
 } from '../lib/schoolService.ts';
+import {
+  NotificationTargetMode,
+  canNotifyParentsForRole,
+  canSendMessageToRole,
+  filterContactsForSender,
+  getAllowedNotificationModes,
+} from '../lib/rolePermissions.ts';
+import { formatAuthIdentifierForDisplay } from '../lib/phoneAuth.ts';
+import { ConfirmModal } from './ConfirmModal.tsx';
 
 function getCreatedAtMs(ts: unknown): number {
   if (!ts) return 0;
@@ -39,6 +61,56 @@ function getCreatedAtMs(ts: unknown): number {
     if (typeof maybe.seconds === 'number') return maybe.seconds * 1000;
   }
   return 0;
+}
+
+interface ScopedContact {
+  label: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  studentId?: string;
+  classe?: string;
+}
+
+function buildCenseurContacts(school: SchoolProfile, memberships: Membership[]): ScopedContact[] {
+  const map = new Map<string, ScopedContact>();
+  memberships
+    .filter((m) => m.role === 'censeur')
+    .forEach((m) => {
+      const em = normalizeEmail(m.memberEmail);
+      if (em) {
+        map.set(em, {
+          label: `Censeur · ${m.memberName}`,
+          email: em,
+          name: m.memberName,
+          role: 'censeur',
+        });
+      }
+    });
+  (school.censeurEmails ?? []).forEach((rawEmail, idx) => {
+    const em = normalizeEmail(rawEmail);
+    if (em && !map.has(em)) {
+      const cName = school.censeurNames?.[idx]?.trim() || 'Censeur';
+      map.set(em, {
+        label: `Censeur · ${cName}`,
+        email: em,
+        name: cName,
+        role: 'censeur',
+      });
+    }
+  });
+  return Array.from(map.values());
+}
+
+function buildDirectorContact(school: SchoolProfile): ScopedContact | null {
+  const dirEmail = normalizeEmail(school.ownerEmail || '');
+  if (!dirEmail) return null;
+  return {
+    label: `Directeur · ${school.adminName}`,
+    email: dirEmail,
+    name: school.adminName || 'Directeur',
+    role: 'admin',
+  };
 }
 
 interface MessagingViewProps {
@@ -75,6 +147,35 @@ export function MessagingView({
   const [sentNotice, setSentNotice] = useState<string | null>(null);
   const [errorNotice, setErrorNotice] = useState<string | null>(null);
   const [filterBox, setFilterBox] = useState<'all' | 'unread'>('all');
+  const [deletingMsgId, setDeletingMsgId] = useState<string | null>(null);
+
+  const senderRoleToWrite: UserRole = actualRole ?? effectiveRole;
+  const cleanActorEmail = normalizeEmail(actorEmail);
+  const canTypeAnyRecipient = canNotifyParentsForRole(senderRoleToWrite);
+
+  const canDeleteMessage = (msg: MessageItem): boolean => {
+    if (senderRoleToWrite === 'admin' || senderRoleToWrite === 'censeur') return true;
+    return (
+      normalizeEmail(msg.senderEmail) === cleanActorEmail ||
+      normalizeEmail(msg.recipientEmail) === cleanActorEmail
+    );
+  };
+
+  const handleDeleteMessage = async (msgId: string) => {
+    setDeletingMsgId(msgId);
+    setErrorNotice(null);
+    setSentNotice(null);
+    try {
+      await deleteMessageById(msgId);
+      setSentNotice('Message supprimé.');
+    } catch (err: unknown) {
+      setErrorNotice(
+        err instanceof Error ? err.message : 'Erreur lors de la suppression du message.'
+      );
+    } finally {
+      setDeletingMsgId(null);
+    }
+  };
 
   const sortedStudents = useMemo(
     () =>
@@ -85,60 +186,77 @@ export function MessagingView({
   );
 
   const quickContacts = useMemo(() => {
-    const list: Array<{ label: string; email: string; name: string; studentId?: string; classe?: string }> = [];
-    if (effectiveRole === 'parent') {
-      if (school.email) {
-        list.push({ label: `Direction · ${school.adminName}`, email: school.email, name: school.adminName });
-      }
-      memberships
-        .filter((m) => m.role === 'teacher' || m.role === 'censeur' || m.role === 'secretaire')
-        .forEach((m) => {
-          const prefix =
-            m.role === 'censeur'
-              ? 'Censeur'
-              : m.role === 'secretaire'
-              ? 'Secrétaire'
-              : `Prof. (${m.assignedSubject || 'Enseignant'})`;
-          list.push({
-            label: `${prefix} · ${m.memberName}`,
-            email: m.memberEmail,
-            name: m.memberName,
-          });
+    const rawList: ScopedContact[] = [];
+    const seenEmails = new Set<string>();
+    const addUnique = (item: ScopedContact | null) => {
+      if (!item || !item.email || item.email === cleanActorEmail) return;
+      if (seenEmails.has(item.email)) return;
+      seenEmails.add(item.email);
+      rawList.push(item);
+    };
+
+    // 1. Directeur
+    addUnique(buildDirectorContact(school));
+
+    // 2. Censeur(s)
+    buildCenseurContacts(school, memberships).forEach((c) => addUnique(c));
+
+    // 3. Secrétaire & Enseignants depuis memberships
+    memberships
+      .filter((m) => m.role === 'secretaire' || m.role === 'teacher')
+      .forEach((m) => {
+        const em = normalizeEmail(m.memberEmail);
+        const prefix =
+          m.role === 'secretaire'
+            ? 'Secrétaire'
+            : `Professeur (${m.assignedSubject || 'Enseignant'})`;
+        addUnique({
+          label: `${prefix} · ${m.memberName}`,
+          email: em,
+          name: m.memberName,
+          role: m.role,
         });
-    } else {
+      });
+
+    // 4. Parents (uniquement si l'expéditeur a le droit de contacter les parents)
+    if (canSendMessageToRole(senderRoleToWrite, 'parent')) {
       sortedStudents
         .filter((s) => s.parentEmail)
         .forEach((s) => {
-          list.push({
+          const pEm = normalizeEmail(s.parentEmail);
+          if (!pEm || seenEmails.has(pEm)) return;
+          seenEmails.add(pEm);
+          rawList.push({
             label: `Parent de ${s.nom} ${s.prenoms} (${s.classe})`,
-            email: s.parentEmail!,
+            email: pEm,
             name: s.guardianName || `Parent ${s.nom}`,
+            role: 'parent',
             studentId: s.id,
             classe: s.classe,
           });
         });
+
       memberships
-        .filter((m) => m.memberEmail !== actorEmail)
+        .filter((m) => m.role === 'parent')
         .forEach((m) => {
-          if (!list.some((x) => x.email === m.memberEmail)) {
-            const rLbl =
-              m.role === 'censeur'
-                ? 'Censeur'
-                : m.role === 'secretaire'
-                ? 'Secrétaire'
-                : m.role === 'teacher'
-                ? 'Enseignant'
-                : 'Parent';
-            list.push({
-              label: `${rLbl} · ${m.memberName}`,
-              email: m.memberEmail,
-              name: m.memberName,
-            });
-          }
+          addUnique({
+            label: `Parent · ${m.memberName}`,
+            email: normalizeEmail(m.memberEmail),
+            name: m.memberName,
+            role: 'parent',
+          });
         });
     }
-    return list;
-  }, [effectiveRole, school, memberships, sortedStudents, actorEmail]);
+
+    return filterContactsForSender(senderRoleToWrite, rawList);
+  }, [senderRoleToWrite, school, memberships, sortedStudents, cleanActorEmail]);
+
+  useEffect(() => {
+    if (!canTypeAnyRecipient && quickContacts.length === 1 && !recipientEmail) {
+      setRecipientEmail(quickContacts[0].email);
+      setRecipientName(quickContacts[0].name);
+    }
+  }, [canTypeAnyRecipient, quickContacts, recipientEmail]);
 
   const handleSelectQuickContact = (email: string) => {
     const found = quickContacts.find((c) => c.email === email);
@@ -149,8 +267,18 @@ export function MessagingView({
     }
   };
 
-  const cleanActorEmail = actorEmail.trim().toLowerCase();
-  const senderRoleToWrite: UserRole = actualRole ?? effectiveRole;
+  const messagingPolicySubtitle = useMemo(() => {
+    if (senderRoleToWrite === 'parent') {
+      return 'Canal direct et sécurisé avec le Censeur de l’établissement.';
+    }
+    if (senderRoleToWrite === 'teacher') {
+      return 'Échanges directs réservés au Censeur et au Directeur (aucun envoi aux parents).';
+    }
+    if (senderRoleToWrite === 'secretaire') {
+      return 'Communication interne avec le Directeur, le Censeur et les Professeurs.';
+    }
+    return 'Messagerie globale : direction, secrétariat, professeurs et parents d’élèves.';
+  }, [senderRoleToWrite]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -160,20 +288,39 @@ export function MessagingView({
     setErrorNotice(null);
     try {
       const linkedStudent = students.find((s) => s.id === selectedStudentId);
+      const resolvedRecipient = normalizeEmail(recipientEmail);
+
+      if (!canTypeAnyRecipient) {
+        const matchedContact = quickContacts.find((c) => c.email === resolvedRecipient);
+        if (!matchedContact || !canSendMessageToRole(senderRoleToWrite, matchedContact.role)) {
+          setErrorNotice(
+            senderRoleToWrite === 'parent'
+              ? 'Les parents peuvent uniquement écrire au Censeur.'
+              : senderRoleToWrite === 'teacher'
+              ? 'Les professeurs peuvent uniquement écrire au Censeur et au Directeur.'
+              : 'La secrétaire peut uniquement écrire au Directeur, au Censeur et aux Professeurs.'
+          );
+          return;
+        }
+      }
+
       await sendMessage(ownerUid, school.id, {
         senderUid: actorUid,
         senderEmail: actorEmail,
         senderName: actorName,
         senderRole: senderRoleToWrite,
-        recipientEmail,
-        recipientName: recipientName || recipientEmail.split('@')[0],
+        recipientEmail: resolvedRecipient,
+        recipientName:
+          recipientName || formatAuthIdentifierForDisplay(resolvedRecipient).split('@')[0],
         studentId: linkedStudent?.id ?? '',
         studentName: linkedStudent ? `${linkedStudent.nom} ${linkedStudent.prenoms}` : '',
         classe: linkedStudent?.classe ?? '',
         subject,
         body,
       });
-      setSentNotice(`Message envoyé à ${recipientName || recipientEmail}.`);
+      setSentNotice(
+        `Message envoyé à ${recipientName || formatAuthIdentifierForDisplay(resolvedRecipient)}.`
+      );
       setSubject('');
       setBody('');
     } catch (err: unknown) {
@@ -207,20 +354,18 @@ export function MessagingView({
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl bg-gradient-to-r from-violet-950 via-violet-800 to-indigo-900 text-white p-6 shadow-md border border-violet-700/70 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="theme-surface-header rounded-2xl p-6 shadow-md border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-extrabold text-white">Messagerie sécurisée Enseignants ↔ Parents</h1>
-          <p className="text-xs text-violet-100/90">
-            Échanges directs, confidentiels et rattachés aux dossiers des élèves.
-          </p>
+          <h1 className="text-xl font-extrabold">Messagerie de l’établissement</h1>
+          <p className="text-xs theme-header-subtext mt-0.5">{messagingPolicySubtitle}</p>
         </div>
 
-        <div className="inline-flex p-1 rounded-xl bg-white/15 border border-white/25 self-start">
+        <div className="theme-header-chip inline-flex p-1 rounded-xl border self-start gap-1">
           <button
             type="button"
             onClick={() => setFilterBox('all')}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold ${
-              filterBox === 'all' ? 'bg-white text-violet-950 shadow-xs' : 'text-violet-100'
+              filterBox === 'all' ? 'theme-nav-active shadow-xs' : 'theme-nav-inactive'
             }`}
           >
             Tous ({messages.length})
@@ -229,7 +374,7 @@ export function MessagingView({
             type="button"
             onClick={() => setFilterBox('unread')}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold ${
-              filterBox === 'unread' ? 'bg-white text-violet-950 shadow-xs' : 'text-violet-100'
+              filterBox === 'unread' ? 'theme-nav-active shadow-xs' : 'theme-nav-inactive'
             }`}
           >
             Non lus ({unreadIncomingCount})
@@ -241,12 +386,17 @@ export function MessagingView({
         {/* Compose Form */}
         <form
           onSubmit={handleSend}
-          className="lg:col-span-5 bg-violet-50/90 backdrop-blur-xs border border-violet-300/80 rounded-2xl p-6 space-y-4 h-fit shadow-xs"
+          className="lg:col-span-5 bg-white/95 backdrop-blur-xs border theme-border-soft rounded-2xl p-6 space-y-4 h-fit shadow-xs"
         >
-          <h2 className="text-sm font-bold text-violet-950 flex items-center gap-2">
-            <Send className="w-4 h-4 text-violet-700" />
-            Nouveau message
-          </h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-bold theme-text-ink flex items-center gap-2">
+              <Send className="w-4 h-4 theme-text-accent" />
+              Nouveau message
+            </h2>
+            <span className="theme-pill-soft px-2.5 py-0.5 rounded-lg border text-[11px] font-semibold">
+              {ROLE_SHORT_LABELS[senderRoleToWrite]}
+            </span>
+          </div>
 
           {sentNotice && (
             <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800">
@@ -259,15 +409,24 @@ export function MessagingView({
             </div>
           )}
 
+          {quickContacts.length === 0 && !canTypeAnyRecipient && (
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800">
+              {senderRoleToWrite === 'parent'
+                ? 'Aucun Censeur n’a encore été nommé par le Directeur pour cet établissement.'
+                : 'Aucun destinataire autorisé n’est encore configuré dans cet établissement.'}
+            </div>
+          )}
+
           {quickContacts.length > 0 && (
             <div>
               <label className="block text-xs font-semibold text-zinc-700 mb-1">
-                Choisir un contact rapide
+                {canTypeAnyRecipient ? 'Choisir un contact rapide' : 'Destinataire autorisé *'}
               </label>
               <select
+                required={!canTypeAnyRecipient}
                 value={recipientEmail}
                 onChange={(e) => handleSelectQuickContact(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none focus:border-violet-600"
+                className="theme-input w-full px-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none"
               >
                 <option value="">— Sélectionner un destinataire —</option>
                 {quickContacts.map((c, idx) => (
@@ -279,45 +438,51 @@ export function MessagingView({
             </div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-zinc-700 mb-1">Email destinataire *</label>
-              <input
-                type="email"
-                required
-                value={recipientEmail}
-                onChange={(e) => setRecipientEmail(e.target.value)}
-                placeholder="email@exemple.com"
-                className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
-              />
+          {canTypeAnyRecipient && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                  N° de téléphone ou E-mail destinataire *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={recipientEmail}
+                  onChange={(e) => setRecipientEmail(e.target.value)}
+                  placeholder="90 12 34 56 ou email@exemple.com"
+                  className="theme-input w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-700 mb-1">Nom destinataire</label>
+                <input
+                  type="text"
+                  value={recipientName}
+                  onChange={(e) => setRecipientName(e.target.value)}
+                  placeholder="Nom du destinataire"
+                  className="theme-input w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none"
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-zinc-700 mb-1">Nom destinataire</label>
-              <input
-                type="text"
-                value={recipientName}
-                onChange={(e) => setRecipientName(e.target.value)}
-                placeholder="Nom du parent / prof"
-                className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
-              />
-            </div>
-          </div>
+          )}
 
-          <div>
-            <label className="block text-xs font-semibold text-zinc-700 mb-1">Élève concerné (optionnel)</label>
-            <select
-              value={selectedStudentId}
-              onChange={(e) => setSelectedStudentId(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none focus:border-violet-600"
-            >
-              <option value="">— Aucun élève spécifique —</option>
-              {sortedStudents.map((s) => (
-                <option key={s.id} value={s.id}>
-                  [{s.classe}] {s.nom} {s.prenoms}
-                </option>
-              ))}
-            </select>
-          </div>
+          {sortedStudents.length > 0 && (
+            <div>
+              <label className="block text-xs font-semibold text-zinc-700 mb-1">Élève concerné (optionnel)</label>
+              <select
+                value={selectedStudentId}
+                onChange={(e) => setSelectedStudentId(e.target.value)}
+                className="theme-input w-full px-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none"
+              >
+                <option value="">— Aucun élève spécifique —</option>
+                {sortedStudents.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    [{s.classe}] {s.nom} {s.prenoms}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div>
             <label className="block text-xs font-semibold text-zinc-700 mb-1">Objet *</label>
@@ -326,8 +491,8 @@ export function MessagingView({
               required
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
-              placeholder="Ex : Suivi de notes / Convocation"
-              className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
+              placeholder="Ex : Suivi scolaire / Demande d’information"
+              className="theme-input w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none"
             />
           </div>
 
@@ -339,23 +504,23 @@ export function MessagingView({
               value={body}
               onChange={(e) => setBody(e.target.value)}
               placeholder="Rédigez votre message..."
-              className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600 resize-none"
+              className="theme-input w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none resize-none"
             />
           </div>
 
           <button
             type="submit"
-            disabled={sending}
-            className="w-full py-2.5 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-xs font-semibold transition-colors disabled:opacity-60"
+            disabled={sending || (!canTypeAnyRecipient && quickContacts.length === 0)}
+            className="theme-btn-primary w-full py-2.5 rounded-xl text-xs font-semibold transition-colors disabled:opacity-60"
           >
             {sending ? 'Envoi sécurisé...' : 'Envoyer le message'}
           </button>
         </form>
 
         {/* Thread List */}
-        <div className="lg:col-span-7 bg-white/95 backdrop-blur-xs border border-violet-300/80 rounded-2xl overflow-hidden shadow-xs">
-          <div className="p-5 border-b border-violet-200 bg-violet-100/75">
-            <h2 className="text-sm font-bold text-violet-950">Boîte de réception & messages envoyés</h2>
+        <div className="lg:col-span-7 bg-white/95 backdrop-blur-xs border theme-border-soft rounded-2xl overflow-hidden shadow-xs">
+          <div className="p-5 border-b theme-border-soft theme-pill-soft">
+            <h2 className="text-sm font-bold theme-text-ink">Boîte de réception & messages envoyés</h2>
           </div>
 
           {displayedMessages.length === 0 ? (
@@ -367,11 +532,11 @@ export function MessagingView({
               {displayedMessages.map((msg) => (
                 <div
                   key={msg.id}
-                  className={`p-5 transition-colors ${!msg.read ? 'bg-violet-50/40' : 'hover:bg-zinc-50/50'}`}
+                  className={`p-5 transition-colors ${!msg.read ? 'bg-slate-50/70' : 'hover:bg-zinc-50/50'}`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-lg bg-violet-100 text-violet-700 flex items-center justify-center shrink-0">
+                      <div className="w-8 h-8 rounded-lg theme-pill-soft border flex items-center justify-center shrink-0">
                         <User className="w-4 h-4" />
                       </div>
                       <div>
@@ -379,34 +544,55 @@ export function MessagingView({
                           {msg.senderName}{' '}
                           <span className="font-normal text-zinc-500">→ {msg.recipientName}</span>
                         </p>
-                        <p className="text-[11px] text-zinc-400">
-                          {msg.studentName ? `Élève : ${msg.studentName} (${msg.classe})` : msg.recipientEmail}
+                        <p className="text-[11px] text-zinc-500">
+                          {msg.studentName
+                            ? `Élève : ${msg.studentName} (${msg.classe})`
+                            : formatAuthIdentifierForDisplay(msg.recipientEmail)}
                         </p>
                       </div>
                     </div>
 
-                    {!msg.read &&
-                    (senderRoleToWrite === 'admin' ||
-                      msg.recipientEmail.trim().toLowerCase() === cleanActorEmail) ? (
-                      <button
-                        type="button"
-                        onClick={() => void markMessageRead(msg.id).catch((err) => setErrorNotice(err instanceof Error ? err.message : 'Action refusée.'))}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-violet-700 text-white text-[11px] font-semibold shrink-0"
-                      >
-                        <Mail className="w-3 h-3" />
-                        Marquer lu
-                      </button>
-                    ) : !msg.read ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-amber-600 font-semibold shrink-0">
-                        <Mail className="w-3 h-3" />
-                        Envoyé
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-zinc-400 shrink-0">
-                        <MailOpen className="w-3 h-3" />
-                        Lu
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {!msg.read &&
+                      (senderRoleToWrite === 'admin' ||
+                        normalizeEmail(msg.recipientEmail) === cleanActorEmail) ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void markMessageRead(msg.id).catch((err) =>
+                              setErrorNotice(err instanceof Error ? err.message : 'Action refusée.')
+                            )
+                          }
+                          className="theme-btn-primary inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold shrink-0"
+                        >
+                          <Mail className="w-3 h-3" />
+                          Marquer lu
+                        </button>
+                      ) : !msg.read ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] text-amber-600 font-semibold shrink-0">
+                          <Mail className="w-3 h-3" />
+                          Envoyé
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-[11px] text-zinc-400 shrink-0">
+                          <MailOpen className="w-3 h-3" />
+                          Lu
+                        </span>
+                      )}
+
+                      {canDeleteMessage(msg) && (
+                        <button
+                          type="button"
+                          disabled={deletingMsgId === msg.id}
+                          onClick={() => void handleDeleteMessage(msg.id)}
+                          title="Supprimer ce message"
+                          aria-label="Supprimer ce message"
+                          className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-600 hover:bg-rose-50 transition-colors disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <p className="text-xs font-bold text-zinc-800 mt-3">{msg.subject}</p>
@@ -444,23 +630,47 @@ export function NotificationsCenterView({
   memberships,
   notifications,
 }: NotificationsViewProps) {
+  const allowedModes = useMemo(
+    () => getAllowedNotificationModes(effectiveRole),
+    [effectiveRole]
+  );
+
   const [filterType, setFilterType] = useState<'all' | 'grade' | 'absence' | 'announcement'>('all');
   const [notifType, setNotifType] = useState<'announcement' | 'absence'>('announcement');
+  const [targetMode, setTargetMode] = useState<NotificationTargetMode>(
+    () => allowedModes[0]?.id ?? 'censeur'
+  );
   const [targetClasse, setTargetClasse] = useState('');
   const [studentId, setStudentId] = useState('');
+  const [leadershipScope, setLeadershipScope] = useState<'both' | 'censeur' | 'admin'>('both');
+  const [secretaryScope, setSecretaryScope] = useState<'all_staff' | 'admin' | 'censeur' | 'teachers'>('all_staff');
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
+  const [durationPreset, setDurationPreset] = useState<NotificationDurationPreset>('permanent');
   const [sending, setSending] = useState(false);
   const [markingAll, setMarkingAll] = useState(false);
+  const [cleaningMode, setCleaningMode] = useState<'read' | 'all' | null>(null);
+  const [confirmDeleteAllOpen, setConfirmDeleteAllOpen] = useState(false);
+  const [deletingNotifId, setDeletingNotifId] = useState<string | null>(null);
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
   const [showComposerMobile, setShowComposerMobile] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
 
-  const canPublish =
-    effectiveRole === 'admin' ||
-    effectiveRole === 'censeur' ||
-    effectiveRole === 'secretaire' ||
-    effectiveRole === 'teacher';
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    if (!allowedModes.some((m) => m.id === targetMode)) {
+      setTargetMode(allowedModes[0]?.id ?? 'censeur');
+    }
+  }, [allowedModes, targetMode]);
+
+  const canPublish = allowedModes.length > 0;
+  const isAdminBroadcaster = effectiveRole === 'admin' || effectiveRole === 'censeur';
+  const cleanActorEmail = normalizeEmail(actorEmail);
 
   const sortedClassrooms = useMemo(() => sortClassrooms(classrooms), [classrooms]);
   const sortedStudents = useMemo(
@@ -471,42 +681,160 @@ export function NotificationsCenterView({
     [students]
   );
 
+  const directorContact = useMemo(() => buildDirectorContact(school), [school]);
+  const censeurContacts = useMemo(
+    () => buildCenseurContacts(school, memberships),
+    [school, memberships]
+  );
+  const teacherEmailsList = useMemo(() => {
+    const fromMembers = memberships
+      .filter((m) => m.role === 'teacher')
+      .map((m) => normalizeEmail(m.memberEmail));
+    const fromSchool = (school.teacherEmails ?? []).map((e) => normalizeEmail(e));
+    return Array.from(new Set([...fromMembers, ...fromSchool].filter(Boolean)));
+  }, [memberships, school.teacherEmails]);
+
   const handlePublish = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !message.trim() || !canPublish) return;
     setSending(true);
     setNotice(null);
     setPublishError(null);
+
     try {
       let audience: string[] = [];
-      if (notifType === 'absence' && studentId) {
-        const stu = students.find((s) => s.id === studentId);
-        if (stu?.parentEmail) audience.push(stu.parentEmail);
-      } else if (targetClasse) {
-        students
-          .filter((s) => s.classe === targetClasse && s.parentEmail)
-          .forEach((s) => audience.push(s.parentEmail!));
+      let resolvedTargetClasse = '';
+      let resolvedStudentId = '';
+
+      if (effectiveRole === 'parent') {
+        // Parent : UNIQUEMENT vers le Censeur
+        audience = censeurContacts.map((c) => c.email);
+        if (audience.length === 0) {
+          setPublishError(
+            "Aucun Censeur n'est encore nommé dans cet établissement pour recevoir votre notification."
+          );
+          return;
+        }
+        if (notifType === 'absence' && studentId) {
+          resolvedStudentId = studentId;
+          const stu = students.find((s) => s.id === studentId);
+          resolvedTargetClasse = stu?.classe ?? '';
+        }
+      } else if (effectiveRole === 'teacher') {
+        // Professeur : UNIQUEMENT vers Censeur et/ou Directeur (jamais vers les parents)
+        const censeurs = censeurContacts.map((c) => c.email);
+        const dir = directorContact?.email ? [directorContact.email] : [];
+        if (leadershipScope === 'censeur') audience = censeurs;
+        else if (leadershipScope === 'admin') audience = dir;
+        else audience = [...censeurs, ...dir];
+
+        if (audience.length === 0) {
+          setPublishError(
+            "Aucun compte Censeur ou Directeur n'est encore enregistré pour recevoir cette notification."
+          );
+          return;
+        }
+        if (notifType === 'absence' && studentId) {
+          resolvedStudentId = studentId;
+          const stu = students.find((s) => s.id === studentId);
+          resolvedTargetClasse = stu?.classe ?? '';
+        }
+      } else if (effectiveRole === 'secretaire') {
+        // Secrétaire : UNIQUEMENT vers Directeur, Censeur et Professeurs (jamais vers les parents)
+        const dir = directorContact?.email ? [directorContact.email] : [];
+        const censeurs = censeurContacts.map((c) => c.email);
+        if (secretaryScope === 'admin') audience = dir;
+        else if (secretaryScope === 'censeur') audience = censeurs;
+        else if (secretaryScope === 'teachers') audience = teacherEmailsList;
+        else audience = [...dir, ...censeurs, ...teacherEmailsList];
+
+        if (audience.length === 0) {
+          setPublishError(
+            'Aucun destinataire (Directeur, Censeur ou Professeur) disponible pour cet envoi.'
+          );
+          return;
+        }
       } else {
-        audience = [
-          ...(school.memberEmails ?? []),
-          ...memberships.map((m) => m.memberEmail),
-          ...students.map((s) => s.parentEmail ?? ''),
-        ];
+        // Directeur (admin) & Censeur (censeur) : accès complet à tout le monde
+        if (targetMode === 'student' || (notifType === 'absence' && studentId)) {
+          const stu = students.find((s) => s.id === studentId);
+          if (!stu) {
+            setPublishError('Veuillez sélectionner un élève concerné.');
+            return;
+          }
+          resolvedStudentId = stu.id;
+          resolvedTargetClasse = stu.classe;
+          if (stu.parentEmail) audience.push(stu.parentEmail);
+          (stu.teacherEmails ?? []).forEach((te) => audience.push(te));
+        } else if (targetMode === 'class') {
+          if (!targetClasse) {
+            setPublishError('Veuillez sélectionner une classe cible.');
+            return;
+          }
+          resolvedTargetClasse = targetClasse;
+          students
+            .filter((s) => s.classe === targetClasse && s.parentEmail)
+            .forEach((s) => audience.push(s.parentEmail!));
+          memberships
+            .filter((m) => m.role === 'teacher' && (m.assignedClasses ?? []).includes(targetClasse))
+            .forEach((m) => audience.push(m.memberEmail));
+        } else if (targetMode === 'staff_no_parents') {
+          if (directorContact?.email) audience.push(directorContact.email);
+          audience.push(
+            ...(school.staffEmails ?? []),
+            ...memberships
+              .filter((m) => m.role === 'censeur' || m.role === 'secretaire' || m.role === 'teacher')
+              .map((m) => m.memberEmail)
+          );
+        } else {
+          // Tout l'établissement (direction + secrétariat + professeurs + parents)
+          if (directorContact?.email) audience.push(directorContact.email);
+          audience.push(
+            ...(school.memberEmails ?? []),
+            ...memberships.map((m) => m.memberEmail),
+            ...students.map((s) => s.parentEmail ?? '')
+          );
+        }
       }
-      audience.push(actorEmail);
+
+      // Inclure l'expéditeur uniquement pour les admins (Directeur/Censeur) qui lisent déjà ou suivent leurs diffusions,
+      // mais jamais comme unique destinataire si un rôle restreint n'avait pas d'autre cible.
+      const uniqueAudience = Array.from(
+        new Set(audience.map((e) => normalizeEmail(e)).filter(Boolean))
+      );
+      if (isAdminBroadcaster && cleanActorEmail && !uniqueAudience.includes(cleanActorEmail)) {
+        uniqueAudience.push(cleanActorEmail);
+      }
+
+      if (uniqueAudience.length === 0) {
+        setPublishError('Aucun destinataire valide trouvé pour cette diffusion.');
+        return;
+      }
+
+      const computedExpiresAt = computeNotificationExpiresAt(durationPreset);
 
       await createNotification(ownerUid, school.id, {
         type: notifType,
         title,
         message,
-        targetClasse,
-        studentId,
-        audienceEmails: Array.from(new Set(audience.filter(Boolean))),
+        targetClasse: resolvedTargetClasse,
+        studentId: resolvedStudentId,
+        audienceEmails: uniqueAudience,
         createdByEmail: actorEmail,
         createdByName: actorName,
+        createdByRole: effectiveRole,
+        expiresAt: computedExpiresAt,
       });
 
-      setNotice('Notification diffusée avec succès.');
+      setNotice(
+        effectiveRole === 'parent'
+          ? 'Notification envoyée au Censeur avec succès.'
+          : effectiveRole === 'teacher'
+          ? 'Notification envoyée à la Direction (Censeur / Directeur).'
+          : effectiveRole === 'secretaire'
+          ? 'Notification envoyée au personnel autorisé.'
+          : 'Notification diffusée avec succès.'
+      );
       setTitle('');
       setMessage('');
     } catch (err: unknown) {
@@ -516,19 +844,52 @@ export function NotificationsCenterView({
     }
   };
 
+  const activeNotifs = useMemo(
+    () => notifications.filter((n) => isNotificationVisibleForUser(n, cleanActorEmail, nowTick)),
+    [notifications, cleanActorEmail, nowTick]
+  );
+
   const filteredNotifs = useMemo(() => {
     const list =
-      filterType === 'all' ? notifications : notifications.filter((n) => n.type === filterType);
+      filterType === 'all' ? activeNotifs : activeNotifs.filter((n) => n.type === filterType);
     return [...list].sort((a, b) => {
       const dt = getCreatedAtMs(b.createdAt) - getCreatedAtMs(a.createdAt);
       if (dt !== 0) return dt;
       return b.id.localeCompare(a.id);
     });
-  }, [notifications, filterType]);
+  }, [activeNotifs, filterType]);
+
+  const canMarkNotifRead = (n: NotificationItem) => {
+    if (n.read) return false;
+    if (isAdminBroadcaster) return true;
+    return (n.audienceEmails ?? []).some((e) => normalizeEmail(e) === cleanActorEmail);
+  };
+
+  const canDeleteNotif = (n: NotificationItem) => {
+    if (isAdminBroadcaster) return true;
+    if (normalizeEmail(n.createdByEmail) === cleanActorEmail) return true;
+    return (n.audienceEmails ?? []).some((e) => normalizeEmail(e) === cleanActorEmail);
+  };
 
   const unreadNotifs = useMemo(
-    () => notifications.filter((n) => !n.read),
-    [notifications]
+    () =>
+      activeNotifs.filter(
+        (n) =>
+          !n.read &&
+          (isAdminBroadcaster ||
+            (n.audienceEmails ?? []).some((e) => normalizeEmail(e) === cleanActorEmail))
+      ),
+    [activeNotifs, isAdminBroadcaster, cleanActorEmail]
+  );
+
+  const readNotifs = useMemo(
+    () => filteredNotifs.filter((n) => n.read && canDeleteNotif(n)),
+    [filteredNotifs, isAdminBroadcaster, cleanActorEmail]
+  );
+
+  const deletableFilteredNotifs = useMemo(
+    () => filteredNotifs.filter((n) => canDeleteNotif(n)),
+    [filteredNotifs, isAdminBroadcaster, cleanActorEmail]
   );
 
   const handleMarkAllRead = async () => {
@@ -544,17 +905,75 @@ export function NotificationsCenterView({
     }
   };
 
+  const handleDeleteOneNotif = async (n: NotificationItem) => {
+    setDeletingNotifId(n.id);
+    setPublishError(null);
+    setNotice(null);
+    try {
+      await dismissOrDeleteNotification(n, actorEmail, effectiveRole);
+    } catch (err: unknown) {
+      setPublishError(err instanceof Error ? err.message : 'Erreur lors de la suppression.');
+    } finally {
+      setDeletingNotifId(null);
+    }
+  };
+
+  const handleCleanupRead = async () => {
+    if (readNotifs.length === 0) return;
+    setCleaningMode('read');
+    setPublishError(null);
+    setNotice(null);
+    try {
+      await cleanupNotificationsBulk(readNotifs, actorEmail, effectiveRole);
+      setNotice(`${readNotifs.length} notification(s) lue(s) nettoyée(s).`);
+    } catch (err: unknown) {
+      setPublishError(err instanceof Error ? err.message : 'Erreur lors du nettoyage.');
+    } finally {
+      setCleaningMode(null);
+    }
+  };
+
+  const handleConfirmDeleteAll = async () => {
+    if (deletableFilteredNotifs.length === 0) {
+      setConfirmDeleteAllOpen(false);
+      return;
+    }
+    setCleaningMode('all');
+    setPublishError(null);
+    setNotice(null);
+    try {
+      await cleanupNotificationsBulk(deletableFilteredNotifs, actorEmail, effectiveRole);
+      setNotice(`${deletableFilteredNotifs.length} notification(s) supprimée(s).`);
+      setConfirmDeleteAllOpen(false);
+    } catch (err: unknown) {
+      setPublishError(err instanceof Error ? err.message : 'Erreur lors de la suppression groupée.');
+    } finally {
+      setCleaningMode(null);
+    }
+  };
+
+  const headerSubtitle = useMemo(() => {
+    if (effectiveRole === 'parent') {
+      return 'Consultez vos alertes et adressez directement une notification au Censeur.';
+    }
+    if (effectiveRole === 'teacher') {
+      return 'Recevez les annonces et notifiez uniquement le Censeur ou le Directeur.';
+    }
+    if (effectiveRole === 'secretaire') {
+      return 'Diffusion interne ciblée vers le Directeur, le Censeur et les Professeurs.';
+    }
+    return 'Administration globale : diffusez vos notes, absences et annonces à tout l’établissement.';
+  }, [effectiveRole]);
+
   return (
     <div className="space-y-5 sm:space-y-6">
-      <div className="rounded-2xl bg-gradient-to-r from-violet-950 via-violet-800 to-indigo-900 text-white p-5 sm:p-6 shadow-md border border-violet-700/70 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="theme-surface-header rounded-2xl p-5 sm:p-6 shadow-md border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-lg sm:text-xl font-extrabold text-white">Centre de Notifications & Annonces</h1>
-          <p className="text-xs text-violet-100/90 mt-0.5">
-            Alertes en temps réel sur les notes publiées, les absences et les annonces de la direction.
-          </p>
+          <h1 className="text-lg sm:text-xl font-extrabold">Centre de Notifications & Annonces</h1>
+          <p className="text-xs theme-header-subtext mt-0.5">{headerSubtitle}</p>
         </div>
 
-        <div className="inline-flex flex-wrap p-1 rounded-xl bg-white/15 border border-white/25 self-start gap-1">
+        <div className="theme-header-chip inline-flex flex-wrap p-1 rounded-xl border self-start gap-1">
           {(
             [
               { id: 'all', label: 'Toutes' },
@@ -568,7 +987,7 @@ export function NotificationsCenterView({
               type="button"
               onClick={() => setFilterType(f.id)}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                filterType === f.id ? 'bg-white text-violet-950 shadow-xs' : 'text-violet-100'
+                filterType === f.id ? 'theme-nav-active shadow-xs' : 'theme-nav-inactive'
               }`}
             >
               {f.label}
@@ -582,13 +1001,15 @@ export function NotificationsCenterView({
           <button
             type="button"
             onClick={() => setShowComposerMobile((v) => !v)}
-            className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-violet-700 hover:bg-violet-800 text-white text-xs font-bold shadow-xs"
+            className="theme-btn-primary w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-xs font-bold shadow-xs"
           >
             <Bell className="w-4 h-4" />
             <span>
               {showComposerMobile
-                ? 'Masquer le formulaire de diffusion'
-                : 'Nouvelle alerte ou annonce'}
+                ? 'Masquer le formulaire'
+                : effectiveRole === 'parent'
+                ? 'Notifier le Censeur'
+                : 'Nouvelle notification'}
             </span>
           </button>
         </div>
@@ -600,12 +1021,23 @@ export function NotificationsCenterView({
             onSubmit={handlePublish}
             className={`${
               showComposerMobile ? 'block' : 'hidden lg:block'
-            } order-2 lg:order-1 lg:col-span-5 bg-violet-50/90 backdrop-blur-xs border border-violet-300/80 rounded-2xl p-5 sm:p-6 space-y-4 h-fit shadow-xs`}
+            } order-2 lg:order-1 lg:col-span-5 bg-white/95 backdrop-blur-xs border theme-border-soft rounded-2xl p-5 sm:p-6 space-y-4 h-fit shadow-xs`}
           >
-            <h2 className="text-sm font-bold text-violet-950 flex items-center gap-2">
-              <Bell className="w-4 h-4 text-violet-700" />
-              Diffuser une alerte ou annonce
-            </h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-sm font-bold theme-text-ink flex items-center gap-2">
+                <Bell className="w-4 h-4 theme-text-accent" />
+                {effectiveRole === 'parent'
+                  ? 'Envoyer une notification au Censeur'
+                  : effectiveRole === 'teacher'
+                  ? 'Notifier le Censeur ou le Directeur'
+                  : effectiveRole === 'secretaire'
+                  ? 'Notifier Direction & Professeurs'
+                  : 'Diffuser une alerte ou annonce'}
+              </h2>
+              <span className="theme-pill-soft px-2 py-0.5 rounded-lg border text-[11px] font-semibold">
+                {ROLE_SHORT_LABELS[effectiveRole]}
+              </span>
+            </div>
 
             {notice && (
               <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800">
@@ -618,65 +1050,195 @@ export function NotificationsCenterView({
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-2">
+            {/* Scope explanation pill */}
+            <div className="p-3 rounded-xl theme-pill-soft border text-[11px] flex items-start gap-2 leading-relaxed">
+              <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{allowedModes[0]?.description}</span>
+            </div>
+
+            {/* Type selector */}
+            <div className={effectiveRole === 'secretaire' ? 'grid grid-cols-1' : 'grid grid-cols-2 gap-2'}>
               <button
                 type="button"
                 onClick={() => setNotifType('announcement')}
                 className={`py-2 px-3 rounded-xl text-xs font-semibold border ${
                   notifType === 'announcement'
-                    ? 'bg-violet-700 text-white border-violet-700'
+                    ? 'theme-btn-primary border-transparent'
                     : 'bg-white text-zinc-700 border-zinc-200'
                 }`}
               >
-                Annonce importante
+                {effectiveRole === 'parent' ? 'Message / Requête' : 'Annonce / Note info'}
               </button>
-              <button
-                type="button"
-                onClick={() => setNotifType('absence')}
-                className={`py-2 px-3 rounded-xl text-xs font-semibold border ${
-                  notifType === 'absence'
-                    ? 'bg-amber-600 text-white border-amber-600'
-                    : 'bg-white text-zinc-700 border-zinc-200'
-                }`}
-              >
-                Signalement absence
-              </button>
+              {effectiveRole !== 'secretaire' && (
+                <button
+                  type="button"
+                  onClick={() => setNotifType('absence')}
+                  className={`py-2 px-3 rounded-xl text-xs font-semibold border ${
+                    notifType === 'absence'
+                      ? 'bg-amber-600 text-white border-amber-600'
+                      : 'bg-white text-zinc-700 border-zinc-200'
+                  }`}
+                >
+                  {effectiveRole === 'parent' ? 'Justifier une absence' : 'Signalement absence'}
+                </button>
+              )}
             </div>
 
-            {notifType === 'announcement' ? (
+            {/* Recipient selector strictly bounded by role */}
+            {isAdminBroadcaster && (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                    Destinataires *
+                  </label>
+                  <select
+                    value={targetMode}
+                    onChange={(e) => setTargetMode(e.target.value as NotificationTargetMode)}
+                    className="theme-input w-full px-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none"
+                  >
+                    {allowedModes.map((mode) => (
+                      <option key={mode.id} value={mode.id}>
+                        {mode.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {targetMode === 'class' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                      Classe cible *
+                    </label>
+                    <select
+                      required
+                      value={targetClasse}
+                      onChange={(e) => setTargetClasse(e.target.value)}
+                      className="theme-input w-full px-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none"
+                    >
+                      <option value="">— Sélectionner une classe —</option>
+                      {sortedClassrooms.map((c) => (
+                        <option key={c.id} value={c.name}>
+                          {c.name} ({c.cycle})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {(targetMode === 'student' || notifType === 'absence') && (
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                      Élève concerné {targetMode === 'student' || notifType === 'absence' ? '*' : ''}
+                    </label>
+                    <select
+                      required={targetMode === 'student' || notifType === 'absence'}
+                      value={studentId}
+                      onChange={(e) => setStudentId(e.target.value)}
+                      className="theme-input w-full px-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none"
+                    >
+                      <option value="">— Sélectionner un élève —</option>
+                      {sortedStudents.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          [{s.classe}] {s.nom} {s.prenoms}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {effectiveRole === 'teacher' && (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                    Destinataire (Direction pédagogique) *
+                  </label>
+                  <select
+                    value={leadershipScope}
+                    onChange={(e) =>
+                      setLeadershipScope(e.target.value as 'both' | 'censeur' | 'admin')
+                    }
+                    className="theme-input w-full px-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none"
+                  >
+                    <option value="both">Censeur et Directeur</option>
+                    <option value="censeur">Censeur uniquement</option>
+                    <option value="admin">Directeur uniquement</option>
+                  </select>
+                </div>
+
+                {notifType === 'absence' && sortedStudents.length > 0 && (
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                      Élève concerné (transmis au Censeur/Directeur)
+                    </label>
+                    <select
+                      value={studentId}
+                      onChange={(e) => setStudentId(e.target.value)}
+                      className="theme-input w-full px-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none"
+                    >
+                      <option value="">— Optionnel —</option>
+                      {sortedStudents.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          [{s.classe}] {s.nom} {s.prenoms}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {effectiveRole === 'secretaire' && (
               <div>
                 <label className="block text-xs font-semibold text-zinc-700 mb-1">
-                  Classe cible (laisser vide = toute l’école)
+                  Destinataires autorisés (sans les parents) *
                 </label>
                 <select
-                  value={targetClasse}
-                  onChange={(e) => setTargetClasse(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none focus:border-violet-600"
+                  value={secretaryScope}
+                  onChange={(e) =>
+                    setSecretaryScope(
+                      e.target.value as 'all_staff' | 'admin' | 'censeur' | 'teachers'
+                    )
+                  }
+                  className="theme-input w-full px-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none"
                 >
-                  <option value="">Toute l’établissement</option>
-                  {sortedClassrooms.map((c) => (
-                    <option key={c.id} value={c.name}>
-                      {c.name} ({c.cycle})
-                    </option>
-                  ))}
+                  <option value="all_staff">Directeur, Censeur et Professeurs</option>
+                  <option value="admin">Directeur uniquement</option>
+                  <option value="censeur">Censeur uniquement</option>
+                  <option value="teachers">Professeurs uniquement ({teacherEmailsList.length})</option>
                 </select>
               </div>
-            ) : (
-              <div>
-                <label className="block text-xs font-semibold text-zinc-700 mb-1">Élève absent *</label>
-                <select
-                  required
-                  value={studentId}
-                  onChange={(e) => setStudentId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none focus:border-violet-600"
-                >
-                  <option value="">— Sélectionner un élève —</option>
-                  {sortedStudents.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      [{s.classe}] {s.nom} {s.prenoms}
-                    </option>
-                  ))}
-                </select>
+            )}
+
+            {effectiveRole === 'parent' && (
+              <div className="space-y-3">
+                <div className="p-3 rounded-xl bg-zinc-50 border border-zinc-200 text-xs text-zinc-700">
+                  <span className="font-semibold text-zinc-900">Destinataire : </span>
+                  {censeurContacts.length > 0
+                    ? censeurContacts.map((c) => c.name).join(', ') + ' (Censeur)'
+                    : 'Aucun Censeur nommé pour le moment'}
+                </div>
+
+                {notifType === 'absence' && sortedStudents.length > 0 && (
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                      Enfant concerné
+                    </label>
+                    <select
+                      value={studentId}
+                      onChange={(e) => setStudentId(e.target.value)}
+                      className="theme-input w-full px-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none"
+                    >
+                      <option value="">— Sélectionner votre enfant —</option>
+                      {sortedStudents.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          [{s.classe}] {s.nom} {s.prenoms}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             )}
 
@@ -688,11 +1250,13 @@ export function NotificationsCenterView({
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder={
-                  notifType === 'announcement'
-                    ? 'Ex : Réunion parents-professeurs samedi'
+                  effectiveRole === 'parent'
+                    ? 'Ex : Justification d’absence ou rendez-vous'
+                    : notifType === 'announcement'
+                    ? 'Ex : Note de service ou information'
                     : 'Ex : Absence signalée ce matin'
                 }
-                className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
+                className="theme-input w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none"
               />
             </div>
 
@@ -704,16 +1268,37 @@ export function NotificationsCenterView({
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 placeholder="Précisez la date, l’heure ou les informations utiles..."
-                className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600 resize-none"
+                className="theme-input w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none resize-none"
               />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-zinc-700 mb-1 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 theme-text-accent" />
+                Durée / Délai d’affichage (optionnel)
+              </label>
+              <select
+                value={durationPreset}
+                onChange={(e) => setDurationPreset(e.target.value as NotificationDurationPreset)}
+                className="theme-input w-full px-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none"
+              >
+                {NOTIFICATION_DURATION_OPTIONS.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-zinc-500 mt-1">
+                Passé ce délai, l’annonce ou notification disparaît automatiquement du fil.
+              </p>
             </div>
 
             <button
               type="submit"
-              disabled={sending}
-              className="w-full py-2.5 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-xs font-semibold transition-colors disabled:opacity-60"
+              disabled={sending || (effectiveRole === 'parent' && censeurContacts.length === 0)}
+              className="theme-btn-primary w-full py-2.5 rounded-xl text-xs font-semibold transition-colors disabled:opacity-60"
             >
-              {sending ? 'Publication...' : 'Envoyer la notification'}
+              {sending ? 'Envoi...' : 'Envoyer la notification'}
             </button>
           </form>
         )}
@@ -721,77 +1306,149 @@ export function NotificationsCenterView({
         <div
           className={`order-1 lg:order-2 ${
             canPublish ? 'lg:col-span-7' : 'lg:col-span-12'
-          } bg-white/95 backdrop-blur-xs border border-violet-300/80 rounded-2xl overflow-hidden shadow-xs`}
+          } bg-white/95 backdrop-blur-xs border theme-border-soft rounded-2xl overflow-hidden shadow-xs`}
         >
-          <div className="p-4 sm:p-5 border-b border-violet-200 bg-violet-100/75 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-sm font-bold text-violet-950">
+          <div className="p-4 sm:p-5 border-b theme-border-soft theme-pill-soft flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-bold theme-text-ink">
               Fil des notifications ({filteredNotifs.length})
             </h2>
-            {unreadNotifs.length > 0 && (
-              <button
-                type="button"
-                disabled={markingAll}
-                onClick={() => void handleMarkAllRead()}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-[11px] font-bold transition-colors disabled:opacity-60"
-              >
-                <Check className="w-3.5 h-3.5" />
-                {markingAll ? 'Mise à jour...' : `Tout marquer lu (${unreadNotifs.length})`}
-              </button>
-            )}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {unreadNotifs.length > 0 && (
+                <button
+                  type="button"
+                  disabled={markingAll}
+                  onClick={() => void handleMarkAllRead()}
+                  className="theme-btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-colors disabled:opacity-60"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  {markingAll ? 'Mise à jour...' : `Tout marquer lu (${unreadNotifs.length})`}
+                </button>
+              )}
+              {readNotifs.length > 0 && (
+                <button
+                  type="button"
+                  disabled={cleaningMode !== null}
+                  onClick={() => void handleCleanupRead()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700 text-[11px] font-bold transition-colors disabled:opacity-60"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-zinc-500" />
+                  {cleaningMode === 'read' ? 'Nettoyage...' : `Nettoyer les lues (${readNotifs.length})`}
+                </button>
+              )}
+              {deletableFilteredNotifs.length > 0 && (
+                <button
+                  type="button"
+                  disabled={cleaningMode !== null}
+                  onClick={() => setConfirmDeleteAllOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-[11px] font-bold transition-colors disabled:opacity-60"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Tout supprimer
+                </button>
+              )}
+            </div>
           </div>
 
           {filteredNotifs.length === 0 ? (
             <div className="p-10 text-center text-xs text-zinc-500">Aucune notification pour ce filtre.</div>
           ) : (
             <div className="divide-y divide-zinc-100">
-              {filteredNotifs.map((n) => (
-                <div key={n.id} className={`p-4 sm:p-5 flex items-start gap-3 ${!n.read ? 'bg-violet-50/45' : ''}`}>
-                  <div
-                    className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                      n.type === 'grade'
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : n.type === 'absence'
-                        ? 'bg-amber-100 text-amber-700'
-                        : 'bg-violet-100 text-violet-700'
-                    }`}
-                  >
-                    {n.type === 'grade' ? (
-                      <CheckCircle2 className="w-4 h-4" />
-                    ) : n.type === 'absence' ? (
-                      <AlertTriangle className="w-4 h-4" />
-                    ) : (
-                      <Megaphone className="w-4 h-4" />
-                    )}
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold text-zinc-900 break-words">{n.title}</p>
-                        <p className="text-[11px] text-zinc-500 mt-0.5">
-                          Par {n.createdByName}
-                          {n.targetClasse ? ` · Classe : ${n.targetClasse}` : ''}
-                        </p>
-                      </div>
-                      {!n.read && (
-                        <button
-                          type="button"
-                          onClick={() => void markNotificationRead(n.id)}
-                          className="self-start inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-violet-800 text-white text-[11px] font-semibold shrink-0 transition-colors"
-                        >
-                          <Check className="w-3 h-3" />
-                          Vu
-                        </button>
+              {filteredNotifs.map((n) => {
+                const expMs = getTimestampMs(n.expiresAt);
+                const expLabel =
+                  expMs !== null
+                    ? new Date(expMs).toLocaleString('fr-FR', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    : null;
+                return (
+                  <div key={n.id} className={`p-4 sm:p-5 flex items-start gap-3 ${!n.read ? 'bg-slate-50/75' : ''}`}>
+                    <div
+                      className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                        n.type === 'grade'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : n.type === 'absence'
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'theme-pill-soft border'
+                      }`}
+                    >
+                      {n.type === 'grade' ? (
+                        <CheckCircle2 className="w-4 h-4" />
+                      ) : n.type === 'absence' ? (
+                        <AlertTriangle className="w-4 h-4" />
+                      ) : (
+                        <Megaphone className="w-4 h-4" />
                       )}
                     </div>
-                    <p className="text-xs text-zinc-700 mt-2 leading-relaxed break-words">{n.message}</p>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <p className="text-xs font-bold text-zinc-900 break-words">{n.title}</p>
+                            {expLabel && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-semibold">
+                                <Clock className="w-2.5 h-2.5" />
+                                Expire le {expLabel}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-zinc-500 mt-0.5">
+                            Par {n.createdByName}
+                            {n.createdByRole ? ` (${ROLE_SHORT_LABELS[n.createdByRole]})` : ''}
+                            {n.targetClasse ? ` · Classe : ${n.targetClasse}` : ''}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 self-start shrink-0">
+                          {canMarkNotifRead(n) && (
+                            <button
+                              type="button"
+                              onClick={() => void markNotificationRead(n.id)}
+                              className="theme-btn-primary inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors"
+                            >
+                              <Check className="w-3 h-3" />
+                              Vu
+                            </button>
+                          )}
+                          {canDeleteNotif(n) && (
+                            <button
+                              type="button"
+                              disabled={deletingNotifId === n.id}
+                              onClick={() => void handleDeleteOneNotif(n)}
+                              title="Supprimer cette notification"
+                              aria-label="Supprimer cette notification"
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-zinc-200 bg-white hover:bg-rose-50 hover:border-rose-200 text-zinc-500 hover:text-rose-600 text-[11px] font-semibold transition-colors disabled:opacity-50"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span className="hidden sm:inline">Supprimer</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-xs text-zinc-700 mt-2 leading-relaxed break-words">{n.message}</p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
       </div>
+
+      <ConfirmModal
+        open={confirmDeleteAllOpen}
+        title="Supprimer toutes les notifications affichées ?"
+        description={`Voulez-vous nettoyer ${deletableFilteredNotifs.length} notification(s) de ce fil ? Les annonces que vous avez publiées ou qui relèvent de votre administration seront définitivement supprimées.`}
+        confirmLabel="Tout supprimer"
+        tone="danger"
+        loading={cleaningMode === 'all'}
+        onCancel={() => cleaningMode !== 'all' && setConfirmDeleteAllOpen(false)}
+        onConfirm={handleConfirmDeleteAll}
+      />
     </div>
   );
 }

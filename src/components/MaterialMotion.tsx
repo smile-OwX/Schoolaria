@@ -104,7 +104,7 @@ export function useGlobalMaterialRipple(): void {
 
       const cls = typeof btn.className === 'string' ? btn.className : '';
       const isDarkSurface =
-        /(bg-violet-[6-9]|bg-indigo-[6-9]|bg-purple-[6-9]|bg-emerald-[6-9]|bg-zinc-9|from-violet|from-indigo|text-white)/.test(
+        /(theme-btn-primary|bg-violet-[6-9]|bg-indigo-[6-9]|bg-purple-[6-9]|bg-emerald-[6-9]|bg-zinc-9|from-violet|from-indigo|text-white)/.test(
           cls
         ) && !/bg-white(\s|$)/.test(cls);
 
@@ -146,8 +146,8 @@ export function ExpressiveNavSweep({ routeKey }: { routeKey: string }) {
           scaleX: { duration: 0.34, ease: [0.05, 0.7, 0.1, 1] },
           opacity: { duration: 0.45, times: [0, 0.65, 1], ease: 'easeOut' },
         }}
-        style={{ transformOrigin: 'left center' }}
-        className="pointer-events-none absolute bottom-0 left-0 right-0 h-[2.5px] bg-gradient-to-r from-violet-300 via-white to-fuchsia-300 shadow-[0_0_10px_rgba(255,255,255,0.65)]"
+        style={{ transformOrigin: 'left center', background: 'var(--theme-accent)' }}
+        className="pointer-events-none absolute bottom-0 left-0 right-0 h-[2.5px] opacity-80"
       />
     </AnimatePresence>
   );
@@ -303,25 +303,25 @@ export function GoogleAppsLauncher({
                   exit={{ opacity: 0, scale: 0.94, y: -6 }}
                   transition={{ type: 'spring', stiffness: 430, damping: 28 }}
                   style={{ transformOrigin: 'top right' }}
-                  className="fixed top-[4.25rem] left-3 right-3 sm:left-auto sm:right-6 sm:w-[360px] max-h-[78dvh] overflow-y-auto rounded-3xl bg-white/98 backdrop-blur-xl border border-violet-200 shadow-2xl shadow-violet-950/25 p-4 z-50 text-zinc-900"
+                  className="fixed top-[4.25rem] left-3 right-3 sm:left-auto sm:right-6 sm:w-[360px] max-h-[78dvh] overflow-y-auto rounded-3xl bg-white/98 backdrop-blur-xl border theme-border-soft shadow-2xl p-4 z-50 text-zinc-900"
                 >
-                  <div className="flex items-center justify-between px-2 pb-3 mb-2 border-b border-violet-100">
+                  <div className="flex items-center justify-between px-2 pb-3 mb-2 border-b theme-border-soft">
                     <div>
-                      <p className="text-xs font-extrabold text-violet-950 tracking-tight">
+                      <p className="text-xs font-extrabold theme-text-ink tracking-tight">
                         Fonctions Schoolaria
                       </p>
-                      <p className="text-[11px] text-violet-600">
+                      <p className="text-[11px] text-zinc-500">
                         Accès instantané aux modules
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-semibold text-violet-700 font-mono-nums">
+                      <span className="text-[11px] font-semibold theme-text-accent font-mono-nums">
                         {items.length} outils
                       </span>
                       <button
                         type="button"
                         onClick={() => setOpen(false)}
-                        className="sm:hidden p-1.5 rounded-lg text-zinc-500 hover:bg-violet-50"
+                        className="sm:hidden p-1.5 rounded-lg text-zinc-500 hover:bg-zinc-100"
                         aria-label="Fermer le lanceur"
                       >
                         <X className="w-4 h-4" />
@@ -353,16 +353,16 @@ export function GoogleAppsLauncher({
                           }}
                           className={`group relative flex flex-col items-center justify-center gap-1.5 p-2.5 rounded-2xl border text-center transition-colors ${
                             isActive
-                              ? 'bg-violet-700 text-white border-violet-700 shadow-md shadow-violet-700/25'
-                              : 'bg-violet-50/70 hover:bg-violet-100/90 text-violet-950 border-violet-200/70 hover:border-violet-400'
+                              ? 'theme-btn-primary border-transparent shadow-md'
+                              : 'theme-pill-soft'
                           }`}
                         >
                           {item.badge ? (
                             <span
                               className={`absolute top-1.5 right-1.5 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold font-mono-nums flex items-center justify-center ${
                                 isActive
-                                  ? 'bg-white text-violet-800'
-                                  : 'bg-violet-700 text-white'
+                                  ? 'bg-white text-zinc-900'
+                                  : 'theme-btn-primary'
                               }`}
                             >
                               {item.badge}
@@ -373,7 +373,7 @@ export function GoogleAppsLauncher({
                             className={`w-10 h-10 rounded-xl group-hover:rounded-2xl flex items-center justify-center transition-all duration-200 ${
                               isActive
                                 ? 'bg-white/20 text-white'
-                                : 'bg-white text-violet-700 shadow-xs group-hover:scale-105'
+                                : 'bg-white theme-text-accent shadow-xs group-hover:scale-105'
                             }`}
                           >
                             <Icon className="w-5 h-5" />
@@ -405,8 +405,8 @@ export function GoogleAppsLauncher({
         title="Toutes les fonctions (Menu rapide)"
         className={`group w-10 h-10 rounded-full flex items-center justify-center transition-colors border ${
           open
-            ? 'bg-white text-violet-900 border-white shadow-md'
-            : 'bg-white/12 hover:bg-white/22 text-white border-white/20'
+            ? 'theme-nav-active border-transparent shadow-md'
+            : 'theme-header-chip'
         }`}
       >
         {/* Animated 3x3 Waffle Matrix */}
@@ -414,9 +414,10 @@ export function GoogleAppsLauncher({
           {Array.from({ length: 9 }).map((_, idx) => (
             <span
               key={idx}
+              style={{
+                backgroundColor: open ? 'var(--theme-nav-active-fg)' : 'var(--theme-header-fg)',
+              }}
               className={`w-[3.5px] h-[3.5px] rounded-full transition-transform duration-200 ${
-                open ? 'bg-violet-800' : 'bg-white'
-              } ${
                 idx === 0
                   ? 'group-hover:-translate-x-[0.5px] group-hover:-translate-y-[0.5px]'
                   : idx === 2
@@ -470,7 +471,7 @@ export function ExpressiveModuleCard({
       }}
       whileHover={{ y: -3, scale: 1.012 }}
       whileTap={{ scale: 0.975 }}
-      className="group text-left bg-gradient-to-br from-white/95 to-violet-100/80 backdrop-blur-xs hover:from-white hover:to-violet-50 border border-violet-300/80 hover:border-violet-500 rounded-2xl p-5 transition-shadow hover:shadow-lg hover:shadow-violet-900/10 flex items-start justify-between gap-3 shadow-xs"
+      className="group text-left bg-white/95 backdrop-blur-xs hover:bg-white border theme-border-soft rounded-2xl p-5 transition-shadow hover:shadow-lg flex items-start justify-between gap-3 shadow-xs"
     >
       <div className="flex items-start gap-3.5">
         <div
@@ -479,13 +480,13 @@ export function ExpressiveModuleCard({
           <Icon className="w-5 h-5" />
         </div>
         <div>
-          <h3 className="text-sm font-bold text-violet-950 group-hover:text-violet-700 transition-colors">
+          <h3 className="text-sm font-bold theme-text-ink transition-colors">
             {title}
           </h3>
           <p className="text-xs text-zinc-600 mt-1 leading-relaxed">{subtitle}</p>
         </div>
       </div>
-      <ArrowUpRight className="w-4 h-4 text-violet-400 group-hover:text-violet-700 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform shrink-0 mt-1" />
+      <ArrowUpRight className="w-4 h-4 theme-text-accent opacity-65 group-hover:opacity-100 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform shrink-0 mt-1" />
     </motion.button>
   );
 }

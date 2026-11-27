@@ -24,7 +24,7 @@ export function SplashScreen({ onFinish }: SplashScreenProps) {
   return (
     <div
       onClick={onFinish}
-      className="fixed inset-0 z-50 bg-gradient-to-br from-violet-950 via-violet-800 to-indigo-900 flex flex-col items-center justify-center cursor-pointer select-none overflow-hidden"
+      className="fixed inset-0 z-50 theme-surface-header flex flex-col items-center justify-center cursor-pointer select-none overflow-hidden"
     >
       {FLOATING_DOTS.map((dot, idx) => (
         <motion.div
@@ -33,7 +33,7 @@ export function SplashScreen({ onFinish }: SplashScreenProps) {
           animate={{ opacity: [0.25, 0.7, 0.25], y: [0, 14, 0], scale: 1 }}
           transition={{ duration: 2.2, delay: dot.delay, repeat: Infinity, ease: 'easeInOut' }}
           style={{ left: dot.x, top: dot.y, width: dot.size, height: dot.size }}
-          className="absolute rounded-full bg-white/30"
+          className="absolute rounded-full bg-current opacity-25"
         />
       ))}
 
@@ -43,23 +43,23 @@ export function SplashScreen({ onFinish }: SplashScreenProps) {
         transition={{ duration: 0.65, ease: [0.16, 1, 0.3, 1] }}
         className="relative flex flex-col items-center text-center px-6"
       >
-        <div className="w-16 h-16 rounded-2xl bg-white text-violet-900 flex items-center justify-center shadow-xl shadow-black/25 mb-5">
+        <div className="w-16 h-16 rounded-2xl theme-nav-active flex items-center justify-center shadow-xl shadow-black/20 mb-5">
           <GraduationCap className="w-8 h-8" />
         </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white">
-          School<span className="text-violet-200">aria</span>
+        <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
+          School<span className="theme-header-subtext">aria</span>
         </h1>
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.35, duration: 0.5 }}
-          className="mt-3 flex items-center justify-center gap-2 text-sm sm:text-base font-semibold tracking-wide text-violet-200"
+          className="mt-3 flex items-center justify-center gap-2 text-sm sm:text-base font-semibold tracking-wide theme-header-subtext"
         >
           <span>par (⌐■_■) ·</span>
           <span className="inline-flex items-stretch leading-none select-none">
             <svg
               viewBox="0 0 14 22"
-              className="w-3.5 h-[1.35em] text-violet-200 shrink-0"
+              className="w-3.5 h-[1.35em] theme-header-subtext shrink-0"
               fill="none"
               aria-hidden="true"
             >
@@ -72,7 +72,7 @@ export function SplashScreen({ onFinish }: SplashScreenProps) {
                 strokeLinejoin="round"
               />
             </svg>
-            <span className="border-t-2 border-violet-200 pt-[3px] pr-1 pl-[2px] tracking-wider leading-tight">
+            <span className="border-t-2 border-current pt-[3px] pr-1 pl-[2px] tracking-wider leading-tight">
               i²©τθπ
             </span>
           </span>
@@ -89,7 +89,7 @@ export function SplashScreen({ onFinish }: SplashScreenProps) {
               key={i}
               animate={{ opacity: [0.3, 1, 0.3], y: [0, -4, 0] }}
               transition={{ duration: 0.9, delay: i * 0.16, repeat: Infinity }}
-              className="w-2 h-2 rounded-full bg-white"
+              className="w-2 h-2 rounded-full bg-current opacity-80"
             />
           ))}
         </motion.div>

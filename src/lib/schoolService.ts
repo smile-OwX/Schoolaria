@@ -12,8 +12,13 @@ import {
   Unsubscribe,
   getDocs,
   getDoc,
+  Timestamp,
+  arrayUnion,
 } from 'firebase/firestore';
 import { auth, awaitWithOfflineQueue, db, handleFirestoreError, OperationType } from './firebase.ts';
+import { formatAuthIdentifierForDisplay, resolveIdentifierToAuthEmail } from './phoneAuth.ts';
+import { DEFAULT_SCHOOL_THEME, normalizeSchoolTheme, SchoolUniformTheme } from './schoolTheme.ts';
+import { canNotifyParentsForRole } from './rolePermissions.ts';
 import {
   ALL_CLASSES,
   AcademicArchive,
@@ -41,6 +46,7 @@ import {
   getEffectiveSubjectsForClass,
   getISOWeekKey,
   getPeriodShortLabel,
+  isNotificationVisibleForUser,
   normalizeSubjectKey,
 } from '../types/school.ts';
 
@@ -55,6 +61,7 @@ interface AuditActorContext {
 
 let activeAuditContext: AuditActorContext | null = null;
 const activeManagementEmailsBySchool = new Map<string, string[]>();
+const activeCenseurEmailsBySchool = new Map<string, string[]>();
 
 export function setAuditActorContext(ctx: AuditActorContext | null): void {
   activeAuditContext = ctx;
@@ -72,12 +79,26 @@ function setSchoolManagementEmails(schoolId: string, emails: string[]): string[]
   return clean;
 }
 
+function getSchoolCenseurEmails(schoolId: string): string[] {
+  const existing = activeCenseurEmailsBySchool.get(schoolId) ?? [];
+  return Array.from(new Set(existing.map((e) => normalizeEmail(e)).filter(Boolean))).slice(0, 20);
+}
+
+function setSchoolCenseurEmails(schoolId: string, emails: string[]): string[] {
+  const clean = Array.from(new Set(emails.map((e) => normalizeEmail(e)).filter(Boolean))).slice(0, 20);
+  activeCenseurEmailsBySchool.set(schoolId, clean);
+  return clean;
+}
+
 function sanitizeId(raw: string): string {
   return raw.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 120);
 }
 
 export function normalizeEmail(raw?: string | null): string {
-  return (raw ?? '').trim().toLowerCase().slice(0, 120);
+  const clean = (raw ?? '').trim();
+  if (!clean) return '';
+  const resolved = resolveIdentifierToAuthEmail(clean);
+  return (resolved.authEmail || clean.toLowerCase()).slice(0, 120);
 }
 
 export function safeEmailKey(email: string): string {
@@ -195,14 +216,12 @@ export function subscribeWorkspaceDiscovery(
       });
     }
 
-    // 3. Implicit parent links discovered via students.parentEmail
+    // 3. Implicit parent links discovered via students.parentEmail (even if user also teaches or directs)
     for (const stu of parentLinkedStudents) {
       const sch = byId.get(stu.schoolId);
       if (!sch) continue;
-      const hasAdminOrParent =
-        seenKeys.has(`${sch.id}:admin`) || seenKeys.has(`${sch.id}:parent`);
-      if (hasAdminOrParent) continue;
       const key = `${sch.id}:parent`;
+      if (seenKeys.has(key)) continue;
       seenKeys.add(key);
       options.push({
         key,
@@ -395,6 +414,10 @@ export function subscribeSchoolResources(
     items.filter((item) => item.schoolId === targetSchoolId);
 
   const isManagementStaff = role === 'censeur' || role === 'secretaire';
+  setSchoolCenseurEmails(targetSchoolId, [
+    ...(workspace.school.censeurEmails ?? []),
+    ...(role === 'censeur' && cleanEmail ? [cleanEmail] : []),
+  ]);
   if (isManagementStaff && cleanEmail) {
     setSchoolManagementEmails(targetSchoolId, [
       ...(activeManagementEmailsBySchool.get(targetSchoolId) ?? []),
@@ -419,8 +442,13 @@ export function subscribeSchoolResources(
           const mgmt = mems
             .filter((m) => m.role === 'censeur' || m.role === 'secretaire')
             .map((m) => m.memberEmail);
+          const censeurs = mems
+            .filter((m) => m.role === 'censeur')
+            .map((m) => m.memberEmail);
           if (isManagementStaff && cleanEmail) mgmt.push(cleanEmail);
+          if (role === 'censeur' && cleanEmail) censeurs.push(cleanEmail);
           setSchoolManagementEmails(targetSchoolId, mgmt);
+          setSchoolCenseurEmails(targetSchoolId, censeurs);
           callbacks.onMemberships(mems);
         },
         (err) => {
@@ -762,19 +790,19 @@ export function subscribeSchoolResources(
     );
   }
 
-  // Notifications
-  if (role === 'admin' || isManagementStaff) {
+  // Notifications (automatically filtered for expired or user-dismissed entries)
+  const filterVisibleNotifs = (items: NotificationItem[]): NotificationItem[] =>
+    bySchool(items).filter((n) => isNotificationVisibleForUser(n, cleanEmail));
+
+  if (role === 'admin') {
     unsubs.push(
       onSnapshot(
-        query(
-          collection(db, 'notifications'),
-          role === 'admin'
-            ? where('ownerId', '==', uid)
-            : where('managementEmails', 'array-contains', cleanEmail)
-        ),
+        query(collection(db, 'notifications'), where('ownerId', '==', uid)),
         (snap) => {
           callbacks.onNotifications(
-            bySchool(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<NotificationItem, 'id'>) })))
+            filterVisibleNotifs(
+              snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<NotificationItem, 'id'>) }))
+            )
           );
         },
         (err) => {
@@ -783,17 +811,68 @@ export function subscribeSchoolResources(
           } catch (e) {
             callbacks.onError(e as Error);
           }
+        }
+      )
+    );
+  } else if (role === 'censeur' && cleanEmail) {
+    let notifMgmt: NotificationItem[] = [];
+    let notifAudience: NotificationItem[] = [];
+    let notifSent: NotificationItem[] = [];
+    const emitCenseurNotifs = () =>
+      callbacks.onNotifications(filterVisibleNotifs(dedupeById([notifMgmt, notifAudience, notifSent])));
+
+    unsubs.push(
+      onSnapshot(
+        query(collection(db, 'notifications'), where('managementEmails', 'array-contains', cleanEmail)),
+        (snap) => {
+          notifMgmt = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<NotificationItem, 'id'>) }));
+          emitCenseurNotifs();
+        },
+        (err) => {
+          try {
+            handleFirestoreError(err, OperationType.LIST, 'notifications');
+          } catch (e) {
+            callbacks.onError(e as Error);
+          }
+        }
+      ),
+      onSnapshot(
+        query(collection(db, 'notifications'), where('audienceEmails', 'array-contains', cleanEmail)),
+        (snap) => {
+          notifAudience = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<NotificationItem, 'id'>) }));
+          emitCenseurNotifs();
+        },
+        (err) => {
+          try {
+            handleFirestoreError(err, OperationType.LIST, 'notifications');
+          } catch (e) {
+            callbacks.onError(e as Error);
+          }
+        }
+      ),
+      onSnapshot(
+        query(collection(db, 'notifications'), where('createdByEmail', '==', cleanEmail)),
+        (snap) => {
+          notifSent = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<NotificationItem, 'id'>) }));
+          emitCenseurNotifs();
+        },
+        () => {
+          // Optional sender history
         }
       )
     );
   } else if (cleanEmail) {
+    let notifAudience: NotificationItem[] = [];
+    let notifSent: NotificationItem[] = [];
+    const emitScopedNotifs = () =>
+      callbacks.onNotifications(filterVisibleNotifs(dedupeById([notifAudience, notifSent])));
+
     unsubs.push(
       onSnapshot(
         query(collection(db, 'notifications'), where('audienceEmails', 'array-contains', cleanEmail)),
         (snap) => {
-          callbacks.onNotifications(
-            bySchool(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<NotificationItem, 'id'>) })))
-          );
+          notifAudience = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<NotificationItem, 'id'>) }));
+          emitScopedNotifs();
         },
         (err) => {
           try {
@@ -802,8 +881,20 @@ export function subscribeSchoolResources(
             callbacks.onError(e as Error);
           }
         }
+      ),
+      onSnapshot(
+        query(collection(db, 'notifications'), where('createdByEmail', '==', cleanEmail)),
+        (snap) => {
+          notifSent = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<NotificationItem, 'id'>) }));
+          emitScopedNotifs();
+        },
+        () => {
+          // Optional sender history
+        }
       )
     );
+  } else {
+    callbacks.onNotifications([]);
   }
 
   // Academic Archives (Direction / Censeur / Secrétaire)
@@ -1450,6 +1541,7 @@ export async function saveSchoolProfile(
     address?: string;
     city?: string;
     registrationCode?: string;
+    theme?: SchoolUniformTheme;
   },
   isNew: boolean,
   schoolIdOverride?: string
@@ -1473,12 +1565,15 @@ export async function saveSchoolProfile(
         })()
       : schoolId;
   const ref = doc(db, 'schools', resolvedId);
+  const ownerEmail = auth.currentUser?.uid === uid ? normalizeEmail(auth.currentUser?.email) : '';
+  const cleanTheme = payload.theme ? normalizeSchoolTheme(payload.theme) : DEFAULT_SCHOOL_THEME;
 
   try {
     if (isNew) {
       await awaitWithOfflineQueue(
         setDoc(ref, {
           ownerId: uid,
+          ownerEmail,
           schoolName: payload.schoolName.trim().slice(0, 120),
           adminName: payload.adminName.trim().slice(0, 100),
           academicYear: payload.academicYear.trim().slice(0, 20),
@@ -1489,6 +1584,10 @@ export async function saveSchoolProfile(
           address: (payload.address ?? '').trim().slice(0, 160),
           city: (payload.city ?? '').trim().slice(0, 80),
           registrationCode: (payload.registrationCode ?? '').trim().slice(0, 60),
+          theme: cleanTheme,
+          censeurEmails: [],
+          censeurNames: [],
+          teacherEmails: [],
           memberEmails: [],
           staffEmails: [],
           createdAt: serverTimestamp(),
@@ -1509,21 +1608,26 @@ export async function saveSchoolProfile(
         actorName: payload.adminName,
       });
     } else {
-      await awaitWithOfflineQueue(
-        updateDoc(ref, {
-          schoolName: payload.schoolName.trim().slice(0, 120),
-          adminName: payload.adminName.trim().slice(0, 100),
-          academicYear: payload.academicYear.trim().slice(0, 20),
-          endOfYearDate: (payload.endOfYearDate ?? '').trim().slice(0, 20),
-          motto: (payload.motto ?? '').trim().slice(0, 160),
-          phone: (payload.phone ?? '').trim().slice(0, 30),
-          email: normalizeEmail(payload.email),
-          address: (payload.address ?? '').trim().slice(0, 160),
-          city: (payload.city ?? '').trim().slice(0, 80),
-          registrationCode: (payload.registrationCode ?? '').trim().slice(0, 60),
-          updatedAt: serverTimestamp(),
-        })
-      );
+      const updatePayload: Record<string, unknown> = {
+        schoolName: payload.schoolName.trim().slice(0, 120),
+        adminName: payload.adminName.trim().slice(0, 100),
+        academicYear: payload.academicYear.trim().slice(0, 20),
+        endOfYearDate: (payload.endOfYearDate ?? '').trim().slice(0, 20),
+        motto: (payload.motto ?? '').trim().slice(0, 160),
+        phone: (payload.phone ?? '').trim().slice(0, 30),
+        email: normalizeEmail(payload.email),
+        address: (payload.address ?? '').trim().slice(0, 160),
+        city: (payload.city ?? '').trim().slice(0, 80),
+        registrationCode: (payload.registrationCode ?? '').trim().slice(0, 60),
+        updatedAt: serverTimestamp(),
+      };
+      if (payload.theme) {
+        updatePayload.theme = cleanTheme;
+      }
+      if (ownerEmail) {
+        updatePayload.ownerEmail = ownerEmail;
+      }
+      await awaitWithOfflineQueue(updateDoc(ref, updatePayload));
       void recordAuditLog({
         ownerId: uid,
         schoolId: resolvedId,
@@ -1537,6 +1641,23 @@ export async function saveSchoolProfile(
     return resolvedId;
   } catch (error) {
     handleFirestoreError(error, isNew ? OperationType.CREATE : OperationType.UPDATE, `schools/${resolvedId}`);
+  }
+}
+
+export async function updateSchoolTheme(
+  schoolId: string,
+  theme: SchoolUniformTheme
+): Promise<void> {
+  const cleanTheme = normalizeSchoolTheme(theme);
+  try {
+    await awaitWithOfflineQueue(
+      updateDoc(doc(db, 'schools', schoolId), {
+        theme: cleanTheme,
+        updatedAt: serverTimestamp(),
+      })
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `schools/${schoolId}`);
   }
 }
 
@@ -1609,6 +1730,7 @@ export async function initializeDefaultClassrooms(
       slogan: (cl.slogan ?? '').slice(0, 140),
       teacherEmails: [],
       memberEmails: memberEmails.slice(0, 100),
+      managementEmails: getSchoolManagementEmails(schoolId),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -1711,35 +1833,6 @@ export async function syncTogoCurriculum(
 
       keptNames.add(cls.name);
     }
-
-    ALL_CLASSES.forEach((cl, index) => {
-      if (!keptNames.has(cl.name)) {
-        const clsId = sanitizeId(`${schoolId}_tg_cls_${index}_${cl.name}`);
-        if (!existingIds.has(clsId)) {
-          batch.set(doc(db, 'classrooms', clsId), {
-            ownerId: uid,
-            schoolId,
-            name: cl.name.slice(0, 40),
-            level: (cl.level ?? cl.name).slice(0, 30),
-            cycle: cl.cycle,
-            series: (cl.series ?? '').slice(0, 40),
-            motif: cl.motif ?? 'general',
-            accentColor: cl.accentColor ?? '#6d28d9',
-            room: '',
-            headTeacher: '',
-            headTeacherEmail: '',
-            slogan: (cl.slogan ?? '').slice(0, 140),
-            teacherEmails: [],
-            memberEmails: cleanMembers,
-            managementEmails: getSchoolManagementEmails(schoolId),
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-          keptNames.add(cl.name);
-          opsCount++;
-        }
-      }
-    });
   }
 
   if (opsCount === 0) return false;
@@ -1749,6 +1842,60 @@ export async function syncTogoCurriculum(
     return true;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'subjects');
+  }
+}
+
+export async function ensureDefaultSubjectsForCycle(
+  ownerUid: string,
+  schoolId: string,
+  cycle: CycleType,
+  memberEmails: string[] = []
+): Promise<void> {
+  try {
+    const callerEmail = normalizeEmail(auth.currentUser?.email);
+    const isOwner = auth.currentUser?.uid === ownerUid;
+    const scopeConstraint = isOwner
+      ? where('ownerId', '==', ownerUid)
+      : where('managementEmails', 'array-contains', callerEmail);
+    const snap = await getDocs(query(collection(db, 'subjects'), scopeConstraint));
+    const existingForCycle = snap.docs
+      .map((d) => ({ id: d.id, ...(d.data() as Omit<Subject, 'id'>) }))
+      .filter((s) => s.schoolId === schoolId && s.cycle === cycle);
+    const existingKeys = new Set(existingForCycle.map((s) => normalizeSubjectKey(s.name)));
+
+    const batch = writeBatch(db);
+    let ops = 0;
+    const cleanMembers = memberEmails.slice(0, 100);
+    const mgmt = getSchoolManagementEmails(schoolId);
+
+    DEFAULT_SUBJECTS_BY_CYCLE[cycle].forEach((item, idx) => {
+      const key = normalizeSubjectKey(item.name);
+      if (!existingKeys.has(key)) {
+        const subId = sanitizeId(`${schoolId}_tg_${cycle}_${key}_${idx}`);
+        if (!existingForCycle.some((s) => s.id === subId)) {
+          batch.set(doc(db, 'subjects', subId), {
+            ownerId: ownerUid,
+            schoolId,
+            name: item.name.slice(0, 80),
+            cycle,
+            coef: item.coef,
+            teacherName: '',
+            memberEmails: cleanMembers,
+            managementEmails: mgmt,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+          existingKeys.add(key);
+          ops++;
+        }
+      }
+    });
+
+    if (ops > 0) {
+      await awaitWithOfflineQueue(batch.commit());
+    }
+  } catch {
+    // Non-blocking for roles without subject write access (e.g., Secretaire)
   }
 }
 
@@ -1799,13 +1946,14 @@ export async function createClassroom(
         updatedAt: serverTimestamp(),
       })
     );
+    void ensureDefaultSubjectsForCycle(uid, schoolId, data.cycle, data.memberEmails ?? []);
     void recordAuditLog({
       ownerId: uid,
       schoolId,
       category: 'classroom',
       severity: 'info',
       action: 'Création classe / division',
-      details: `Classe "${data.name.trim()}" (${data.cycle}) créée.${data.headTeacher?.trim() ? ` Titulaire : ${data.headTeacher.trim()}.` : ''}`,
+      details: `Classe "${data.name.trim()}" (${data.cycle}) créée avec matières et coefficients standards.${data.headTeacher?.trim() ? ` Titulaire : ${data.headTeacher.trim()}.` : ''}`,
       targetId: clsId,
     });
     return clsId;
@@ -2100,6 +2248,9 @@ export async function deleteSchoolCascade(
   schoolId: string,
   schoolName: string
 ): Promise<void> {
+  if (!auth.currentUser || auth.currentUser.uid !== ownerUid) {
+    throw new Error('Action refusée : seul le Proviseur créateur de l’établissement peut supprimer cette école.');
+  }
   try {
     const ownedCollections = [
       'classrooms',
@@ -2332,17 +2483,15 @@ export async function syncAccessPropagation(uid: string, schoolId: string): Prom
 
   let notifDocs: Array<{ ref: ReturnType<typeof doc> }> = [];
   let archiveDocs: Array<{ ref: ReturnType<typeof doc> }> = [];
-  if (isOwner) {
-    try {
-      const [notifSnap, archSnap] = await Promise.all([
-        getDocs(query(collection(db, 'notifications'), where('ownerId', '==', uid))),
-        getDocs(query(collection(db, 'academicArchives'), where('ownerId', '==', uid))),
-      ]);
+  try {
+    const archSnap = await getDocs(query(collection(db, 'academicArchives'), scopeConstraint));
+    archiveDocs = archSnap.docs.filter((d) => (d.data() as { schoolId?: string }).schoolId === schoolId);
+    if (isOwner) {
+      const notifSnap = await getDocs(query(collection(db, 'notifications'), where('ownerId', '==', uid)));
       notifDocs = notifSnap.docs.filter((d) => (d.data() as { schoolId?: string }).schoolId === schoolId);
-      archiveDocs = archSnap.docs.filter((d) => (d.data() as { schoolId?: string }).schoolId === schoolId);
-    } catch {
-      // Optional secondary propagation
     }
+  } catch {
+    // Optional secondary propagation
   }
 
   const memberships = memSnap.docs
@@ -2370,6 +2519,23 @@ export async function syncAccessPropagation(uid: string, schoolId: string): Prom
     new Set(
       memberships
         .filter((m) => m.role === 'censeur' || m.role === 'secretaire' || m.role === 'teacher')
+        .map((m) => normalizeEmail(m.memberEmail))
+        .filter(Boolean)
+    )
+  ).slice(0, 100);
+  const censeurMembers = memberships.filter((m) => m.role === 'censeur');
+  const censeurEmails = setSchoolCenseurEmails(
+    schoolId,
+    censeurMembers.map((m) => normalizeEmail(m.memberEmail)).filter(Boolean)
+  );
+  const censeurNames = censeurEmails.map((em) => {
+    const found = censeurMembers.find((m) => normalizeEmail(m.memberEmail) === em);
+    return (found?.memberName ?? 'Censeur').trim().slice(0, 80);
+  });
+  const teacherEmails = Array.from(
+    new Set(
+      memberships
+        .filter((m) => m.role === 'teacher')
         .map((m) => normalizeEmail(m.memberEmail))
         .filter(Boolean)
     )
@@ -2419,7 +2585,9 @@ export async function syncAccessPropagation(uid: string, schoolId: string): Prom
   const studentAccessById = new Map<string, { parentEmail: string; teacherEmails: string[] }>();
   stuDocs.forEach((d) => {
     const s = d.data() as Student;
-    const pEmail = parentEmailByStudentId.get(d.id) ?? normalizeEmail(s.parentEmail);
+    const pEmail =
+      parentEmailByStudentId.get(d.id) ??
+      (normalizeEmail(s.parentEmail) || normalizeEmail(s.guardianPhone));
     const tEmails = teacherEmailsForClass(s.classe, classroomHeadEmailByName.get(s.classe));
     studentAccessById.set(d.id, { parentEmail: pEmail, teacherEmails: tEmails });
   });
@@ -2428,14 +2596,21 @@ export async function syncAccessPropagation(uid: string, schoolId: string): Prom
     ref: ReturnType<typeof doc>;
     data: Record<string, unknown>;
   };
+  const schoolSyncData: Record<string, unknown> = {
+    memberEmails: allMemberEmails,
+    staffEmails,
+    censeurEmails,
+    censeurNames,
+    teacherEmails,
+    updatedAt: serverTimestamp(),
+  };
+  if (isOwner && callerEmail) {
+    schoolSyncData.ownerEmail = callerEmail;
+  }
   const updates: PendingUpdate[] = [
     {
       ref: doc(db, 'schools', schoolId),
-      data: {
-        memberEmails: allMemberEmails,
-        staffEmails,
-        updatedAt: serverTimestamp(),
-      },
+      data: schoolSyncData,
     },
   ];
 
@@ -2513,7 +2688,7 @@ export async function syncAccessPropagation(uid: string, schoolId: string): Prom
   notifDocs.forEach((d) => {
     updates.push({
       ref: d.ref,
-      data: { managementEmails, updatedAt: serverTimestamp() },
+      data: { managementEmails: censeurEmails, updatedAt: serverTimestamp() },
     });
   });
 
@@ -2810,7 +2985,7 @@ async function syncStudentLockAndParentMembership(
             ownerId: uid,
             schoolId,
             memberEmail: cleanParentEmail,
-            memberName: (data.guardianName || cleanParentEmail.split('@')[0] || 'Parent').trim().slice(0, 100),
+            memberName: (data.guardianName || formatAuthIdentifierForDisplay(cleanParentEmail).split('@')[0] || 'Parent').trim().slice(0, 100),
             role: 'parent',
             assignedClasses: [],
             assignedSubject: '',
@@ -2847,6 +3022,7 @@ export async function createStudent(
 ): Promise<string> {
   const studentId = sanitizeId(`stu_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
   const cleanStudentEmail = normalizeEmail(data.studentEmail);
+  const cleanParentEmail = normalizeEmail(data.parentEmail) || normalizeEmail(data.guardianPhone);
   try {
     await awaitWithOfflineQueue(
       setDoc(doc(db, 'students', studentId), {
@@ -2861,7 +3037,7 @@ export async function createStudent(
         classe: data.classe.trim().slice(0, 40),
         guardianName: (data.guardianName ?? '').trim().slice(0, 100),
         guardianPhone: (data.guardianPhone ?? '').trim().slice(0, 30),
-        parentEmail: normalizeEmail(data.parentEmail),
+        parentEmail: cleanParentEmail,
         studentEmail: cleanStudentEmail,
         teacherEmails: (data.teacherEmails ?? []).slice(0, 25),
         managementEmails: getSchoolManagementEmails(schoolId),
@@ -2872,7 +3048,7 @@ export async function createStudent(
     );
     await syncStudentLockAndParentMembership(uid, schoolId, studentId, {
       guardianName: data.guardianName,
-      parentEmail: data.parentEmail,
+      parentEmail: cleanParentEmail,
       studentEmail: cleanStudentEmail,
     });
     void recordAuditLog({
@@ -2912,6 +3088,7 @@ export async function updateStudent(
   }
 ): Promise<void> {
   const cleanStudentEmail = normalizeEmail(data.studentEmail);
+  const cleanParentEmail = normalizeEmail(data.parentEmail) || normalizeEmail(data.guardianPhone);
   try {
     await awaitWithOfflineQueue(
       updateDoc(doc(db, 'students', studentId), {
@@ -2924,7 +3101,7 @@ export async function updateStudent(
         classe: data.classe.trim().slice(0, 40),
         guardianName: (data.guardianName ?? '').trim().slice(0, 100),
         guardianPhone: (data.guardianPhone ?? '').trim().slice(0, 30),
-        parentEmail: normalizeEmail(data.parentEmail),
+        parentEmail: cleanParentEmail,
         studentEmail: cleanStudentEmail,
         teacherEmails: (data.teacherEmails ?? []).slice(0, 25),
         status: data.status,
@@ -2934,7 +3111,7 @@ export async function updateStudent(
     if (data.ownerUid && data.schoolId) {
       await syncStudentLockAndParentMembership(data.ownerUid, data.schoolId, studentId, {
         guardianName: data.guardianName,
-        parentEmail: data.parentEmail,
+        parentEmail: cleanParentEmail,
         studentEmail: cleanStudentEmail,
         previousStudentEmail: data.previousStudentEmail,
       });
@@ -3050,7 +3227,7 @@ export async function upsertGrade(
     parentEmail?: string;
     teacherEmails?: string[];
   },
-  actor?: { email: string; name: string; studentName?: string; moyMat?: number | null }
+  actor?: { email: string; name: string; role?: UserRole; studentName?: string; moyMat?: number | null }
 ): Promise<void> {
   const gradeId = sanitizeId(`${payload.studentId}_${payload.subjectId}_T${payload.trimester}`);
   const ref = doc(db, 'grades', gradeId);
@@ -3130,7 +3307,8 @@ export async function upsertGrade(
     });
 
     const pEmail = normalizeEmail(payload.parentEmail ?? existingGrade?.parentEmail);
-    if (pEmail && actor?.email) {
+    const actorRole = actor?.role ?? activeAuditContext?.actorRole ?? 'censeur';
+    if (pEmail && actor?.email && canNotifyParentsForRole(actorRole)) {
       const moyTxt = actor.moyMat !== null && actor.moyMat !== undefined ? `Moyenne : ${actor.moyMat}/20` : 'Nouvelle note saisie';
       await createNotification(ownerUid, schoolId, {
         type: 'grade',
@@ -3141,6 +3319,7 @@ export async function upsertGrade(
         audienceEmails: [pEmail],
         createdByEmail: actor.email,
         createdByName: actor.name,
+        createdByRole: actorRole,
       });
     }
   } catch (error) {
@@ -3288,6 +3467,14 @@ export async function markMessageRead(messageId: string): Promise<void> {
   }
 }
 
+export async function deleteMessageById(messageId: string): Promise<void> {
+  try {
+    await awaitWithOfflineQueue(deleteDoc(doc(db, 'messages', messageId)));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `messages/${messageId}`);
+  }
+}
+
 export async function createNotification(
   ownerUid: string,
   schoolId: string,
@@ -3300,9 +3487,13 @@ export async function createNotification(
     audienceEmails: string[];
     createdByEmail: string;
     createdByName: string;
+    createdByRole?: UserRole;
+    expiresAt?: Date | null;
   }
 ): Promise<void> {
   const notifId = sanitizeId(`notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
+  const createdByRole: UserRole =
+    payload.createdByRole ?? activeAuditContext?.actorRole ?? 'admin';
   try {
     await awaitWithOfflineQueue(
       setDoc(doc(db, 'notifications', notifId), {
@@ -3314,10 +3505,13 @@ export async function createNotification(
         targetClasse: (payload.targetClasse ?? '').slice(0, 40),
         studentId: (payload.studentId ?? '').slice(0, 128),
         audienceEmails: Array.from(new Set(payload.audienceEmails.map((e) => normalizeEmail(e)).filter(Boolean))).slice(0, 100),
-        managementEmails: getSchoolManagementEmails(schoolId),
+        dismissedByEmails: [],
+        managementEmails: getSchoolCenseurEmails(schoolId),
         createdByEmail: normalizeEmail(payload.createdByEmail),
         createdByName: payload.createdByName.trim().slice(0, 100),
+        createdByRole,
         read: false,
+        expiresAt: payload.expiresAt ? Timestamp.fromDate(payload.expiresAt) : null,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       })
@@ -3356,6 +3550,81 @@ export async function markAllNotificationsRead(notificationIds: string[]): Promi
       await awaitWithOfflineQueue(batch.commit());
     } catch {
       await Promise.allSettled(chunk.map((id) => markNotificationRead(id)));
+    }
+  }
+}
+
+export async function deleteNotificationById(notificationId: string): Promise<void> {
+  try {
+    await awaitWithOfflineQueue(deleteDoc(doc(db, 'notifications', notificationId)));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `notifications/${notificationId}`);
+  }
+}
+
+function shouldHardDeleteNotification(
+  notif: NotificationItem,
+  cleanActorEmail: string,
+  actorRole: UserRole
+): boolean {
+  if (actorRole === 'admin' || actorRole === 'censeur') return true;
+  if (cleanActorEmail && normalizeEmail(notif.createdByEmail) === cleanActorEmail) return true;
+  const audience = (notif.audienceEmails ?? []).map((e) => normalizeEmail(e)).filter(Boolean);
+  return audience.length <= 1;
+}
+
+export async function dismissOrDeleteNotification(
+  notif: NotificationItem,
+  actorEmail: string,
+  actorRole: UserRole
+): Promise<void> {
+  const cleanActor = normalizeEmail(actorEmail);
+  const hardDelete = shouldHardDeleteNotification(notif, cleanActor, actorRole);
+  if (hardDelete) {
+    await deleteNotificationById(notif.id);
+    return;
+  }
+  if (!cleanActor) return;
+  try {
+    await awaitWithOfflineQueue(
+      updateDoc(doc(db, 'notifications', notif.id), {
+        dismissedByEmails: arrayUnion(cleanActor),
+        updatedAt: serverTimestamp(),
+      })
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `notifications/${notif.id}`);
+  }
+}
+
+export async function cleanupNotificationsBulk(
+  notifs: NotificationItem[],
+  actorEmail: string,
+  actorRole: UserRole
+): Promise<void> {
+  if (notifs.length === 0) return;
+  const cleanActor = normalizeEmail(actorEmail);
+  const CHUNK = 380;
+  for (let i = 0; i < notifs.length; i += CHUNK) {
+    const chunk = notifs.slice(i, i + CHUNK);
+    try {
+      const batch = writeBatch(db);
+      for (const n of chunk) {
+        const ref = doc(db, 'notifications', n.id);
+        if (shouldHardDeleteNotification(n, cleanActor, actorRole)) {
+          batch.delete(ref);
+        } else if (cleanActor) {
+          batch.update(ref, {
+            dismissedByEmails: arrayUnion(cleanActor),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
+      await awaitWithOfflineQueue(batch.commit());
+    } catch {
+      await Promise.allSettled(
+        chunk.map((n) => dismissOrDeleteNotification(n, cleanActor, actorRole))
+      );
     }
   }
 }
@@ -3511,6 +3780,7 @@ export async function seedDemoSchoolData(
       audienceEmails: [demoParentEmail, demoTeacherEmail],
       createdByEmail: actorEmail,
       createdByName: adminName,
+      createdByRole: 'admin',
       read: false,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -3528,7 +3798,8 @@ export async function seedDemoSchoolData(
       studentId: demoStudents[7].id,
       audienceEmails: [demoParentEmail],
       createdByEmail: actorEmail,
-      createdByName: 'Prof. Amégah Marc',
+      createdByName: adminName,
+      createdByRole: 'admin',
       read: false,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -3546,7 +3817,8 @@ export async function seedDemoSchoolData(
       studentId: demoStudents[0].id,
       audienceEmails: [demoParentEmail],
       createdByEmail: actorEmail,
-      createdByName: 'Prof. Amégah Marc',
+      createdByName: adminName,
+      createdByRole: 'admin',
       read: false,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -3561,8 +3833,8 @@ export async function seedDemoSchoolData(
       schoolId,
       senderUid: uid,
       senderEmail: actorEmail,
-      senderName: 'Prof. Amégah Marc',
-      senderRole: 'teacher',
+      senderName: adminName,
+      senderRole: 'admin',
       recipientEmail: demoParentEmail,
       recipientName: 'M. Adjaho Komlan',
       studentId: demoStudents[0].id,

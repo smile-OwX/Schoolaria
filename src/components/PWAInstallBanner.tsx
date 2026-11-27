@@ -34,7 +34,7 @@ export function PWAInstallButton({ variant = 'header' }: PWAInstallButtonProps) 
     variant === 'sidebar'
       ? 'w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-white/15 hover:bg-white/25 border border-white/25 text-white text-xs font-semibold transition-all whitespace-nowrap shrink-0'
       : variant === 'card'
-      ? 'inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0'
+      ? 'inline-flex items-center gap-2 px-4 py-2.5 rounded-xl theme-nav-active border theme-border-soft text-xs font-bold transition-colors whitespace-nowrap shrink-0 shadow-xs'
       : 'inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/15 hover:bg-white/25 border border-white/25 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0';
 
   return (
@@ -47,18 +47,18 @@ export function PWAInstallButton({ variant = 'header' }: PWAInstallButtonProps) 
       {showGuideModal &&
         typeof document !== 'undefined' &&
         createPortal(
-          <div className="fixed inset-0 z-50 bg-violet-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-            <div className="bg-white border border-violet-200 rounded-2xl max-w-lg w-full max-h-[90dvh] overflow-y-auto p-5 sm:p-6 shadow-2xl space-y-5 text-zinc-800">
+          <div className="fixed inset-0 z-50 bg-zinc-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+            <div className="bg-white border theme-border-soft rounded-2xl max-w-lg w-full max-h-[90dvh] overflow-y-auto p-5 sm:p-6 shadow-2xl space-y-5 text-zinc-800">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-700 to-indigo-700 text-white flex items-center justify-center shrink-0">
+                  <div className="w-10 h-10 rounded-xl theme-btn-primary flex items-center justify-center shrink-0">
                     <MonitorSmartphone className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-violet-950">
+                    <h3 className="text-base font-bold theme-text-ink">
                       Installer Schoolaria sur PC & Mobile
                     </h3>
-                    <p className="text-xs text-violet-700">
+                    <p className="text-xs theme-text-accent">
                       Application Web Progressive (PWA) · Aucun store requis
                     </p>
                   </div>
@@ -66,7 +66,7 @@ export function PWAInstallButton({ variant = 'header' }: PWAInstallButtonProps) 
                 <button
                   type="button"
                   onClick={() => setShowGuideModal(false)}
-                  className="p-1.5 rounded-lg text-zinc-500 hover:bg-violet-50 hover:text-violet-800"
+                  className="p-1.5 rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
                   aria-label="Fermer"
                 >
                   <X className="w-4 h-4" />
@@ -74,29 +74,29 @@ export function PWAInstallButton({ variant = 'header' }: PWAInstallButtonProps) 
               </div>
 
               {isIOS ? (
-                <div className="p-4 rounded-xl bg-violet-50 border border-violet-200 space-y-2 text-xs">
-                  <p className="font-bold text-violet-950 flex items-center gap-2">
-                    <Smartphone className="w-4 h-4 text-violet-700" />
+                <div className="p-4 rounded-xl theme-pill-soft border space-y-2 text-xs">
+                  <p className="font-bold theme-text-ink flex items-center gap-2">
+                    <Smartphone className="w-4 h-4 theme-text-accent" />
                     Installation sur iPhone / iPad (Safari)
                   </p>
                   <ol className="list-decimal list-inside space-y-1.5 text-zinc-700">
                     <li>
-                      Appuyez sur le bouton <Share className="w-3.5 h-3.5 inline text-violet-700" />{' '}
+                      Appuyez sur le bouton <Share className="w-3.5 h-3.5 inline theme-text-accent" />{' '}
                       <strong>Partager</strong> en bas de Safari.
                     </li>
                     <li>
                       Faites défiler et choisissez <strong>« Sur l’écran d’accueil »</strong>.
                     </li>
                     <li>
-                      Appuyez sur <strong>Ajouter</strong> : l’icône violette de votre école apparaît comme une vraie application.
+                      Appuyez sur <strong>Ajouter</strong> : l’icône de votre école apparaît comme une vraie application.
                     </li>
                   </ol>
                 </div>
               ) : (
                 <div className="space-y-3 text-xs">
-                  <div className="p-4 rounded-xl bg-violet-50 border border-violet-200 space-y-1.5">
-                    <p className="font-bold text-violet-950 flex items-center gap-2">
-                      <Laptop className="w-4 h-4 text-violet-700" />
+                  <div className="p-4 rounded-xl theme-pill-soft border space-y-1.5">
+                    <p className="font-bold theme-text-ink flex items-center gap-2">
+                      <Laptop className="w-4 h-4 theme-text-accent" />
                       Installer & Épingler sur le Bureau (PC · Chrome ou Edge)
                     </p>
                     <p className="text-zinc-700 leading-relaxed">
@@ -129,7 +129,7 @@ export function PWAInstallButton({ variant = 'header' }: PWAInstallButtonProps) 
                 <button
                   type="button"
                   onClick={() => setShowGuideModal(false)}
-                  className="px-5 py-2 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-xs font-semibold transition-colors"
+                  className="px-5 py-2 rounded-xl theme-btn-primary text-xs font-semibold transition-colors"
                 >
                   Compris
                 </button>

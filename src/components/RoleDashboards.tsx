@@ -50,9 +50,12 @@ import {
 import {
   createMembership,
   deleteMembershipById,
+  dismissOrDeleteNotification,
   markNotificationRead,
+  normalizeEmail,
   updateClassroomTitulaire,
 } from '../lib/schoolService.ts';
+import { formatAuthIdentifierForDisplay } from '../lib/phoneAuth.ts';
 import { filterChildrenForParent } from '../lib/parentHelpers.ts';
 import { ExpressiveModuleCard } from './MaterialMotion.tsx';
 
@@ -246,96 +249,147 @@ function AdminDashboard({
         {
           id: 'inscription' as ActiveTab,
           title: 'Inscriptions & Dossiers',
-          subtitle: 'Inscrire, modifier ou supprimer un élève et gérer les contacts parents',
+          subtitle: 'Inscrire, modifier ou supprimer un élève et gérer les dossiers scolaires',
           icon: UserPlus,
-          accent: 'bg-violet-700 text-white',
+          accent: 'theme-btn-primary',
         },
         {
           id: 'makelist' as ActiveTab,
           title: 'Classes & Listes',
           subtitle: 'Créer ou supprimer des classes et consulter les effectifs en lecture seule',
           icon: ClipboardList,
-          accent: 'bg-violet-100 text-violet-700',
+          accent: 'theme-pill-soft border',
         },
         {
           id: 'bulletins' as ActiveTab,
           title: 'Édition & Impression PDF',
           subtitle: 'Consulter et imprimer les bulletins (lots PDF) sans modification de notes',
           icon: FileSpreadsheet,
-          accent: 'bg-violet-100 text-violet-700',
+          accent: 'theme-pill-soft border',
         },
         {
           id: 'archives' as ActiveTab,
           title: 'Archives annuelles',
           subtitle: 'Consulter les listes et résultats archivés des années précédentes',
           icon: Archive,
-          accent: 'bg-indigo-100 text-indigo-700',
+          accent: 'bg-indigo-100 text-indigo-800',
         },
         {
           id: 'messages' as ActiveTab,
-          title: 'Messagerie administrative',
-          subtitle: `${messages.length} échange(s) · ${unreadMessages} non lu(s) avec parents et profs`,
+          title: 'Messagerie équipe & direction',
+          subtitle: `${messages.length} échange(s) · ${unreadMessages} non lu(s) avec Directeur, Censeur & Profs`,
           icon: MessageSquare,
-          accent: 'bg-indigo-100 text-indigo-700',
+          accent: 'bg-indigo-100 text-indigo-800',
         },
         {
           id: 'notifications' as ActiveTab,
-          title: 'Annonces & Alertes',
-          subtitle: `Diffuser les convocations et avis aux familles (${notifications.length})`,
+          title: 'Notifications équipe',
+          subtitle: `Notifier Directeur, Censeur et Professeurs uniquement (${notifications.length})`,
           icon: Megaphone,
-          accent: 'bg-emerald-100 text-emerald-700',
+          accent: 'bg-emerald-100 text-emerald-800',
         },
       ];
     }
 
-    const base = [
-      {
-        id: 'inscription' as ActiveTab,
-        title: 'Inscription',
-        subtitle: 'Enregistrer un élève, sa classe/division et l’email du parent',
-        icon: UserPlus,
-        accent: 'bg-violet-700 text-white',
-      },
+    if (isCenseur) {
+      return [
+        {
+          id: 'makelist' as ActiveTab,
+          title: 'Classes & Notes (Make List)',
+          subtitle: 'Créer ou supprimer des classes (coefficients fixes) et saisir les notes',
+          icon: ClipboardList,
+          accent: 'theme-btn-primary',
+        },
+        {
+          id: 'bulletins' as ActiveTab,
+          title: 'Bulletins & Suivi',
+          subtitle: 'Saisir les appréciations et générer les bulletins PDF/Word',
+          icon: FileSpreadsheet,
+          accent: 'theme-pill-soft border',
+        },
+        {
+          id: 'stats' as ActiveTab,
+          title: 'Statistiques globales',
+          subtitle: 'Effectifs par division, parité, réussite et majors de classe',
+          icon: BarChart3,
+          accent: 'theme-pill-soft border',
+        },
+        {
+          id: 'roles' as ActiveTab,
+          title: 'Secrétaire, Profs & Parents',
+          subtitle: `${teachersCount} enseignant(s) · ${parentsCount} parent(s) · Secrétariat`,
+          icon: Shield,
+          accent: 'bg-emerald-100 text-emerald-800',
+        },
+        {
+          id: 'messages' as ActiveTab,
+          title: 'Messagerie sécurisée',
+          subtitle: `${messages.length} échange(s) · ${unreadMessages} non lu(s) avec tout l’établissement`,
+          icon: MessageSquare,
+          accent: 'bg-indigo-100 text-indigo-800',
+        },
+        {
+          id: 'notifications' as ActiveTab,
+          title: 'Annonces & Alertes',
+          subtitle: `Diffuser à tout l’établissement, parents et profs (${notifications.length})`,
+          icon: Megaphone,
+          accent: 'bg-amber-100 text-amber-800',
+        },
+      ];
+    }
+
+    return [
       {
         id: 'makelist' as ActiveTab,
-        title: 'Classes & Notes (Make List)',
-        subtitle: 'Collège (Trimestres) et Lycée (Semestres · 2nde, 1ère, Tle)',
+        title: 'Classes & Divisions',
+        subtitle: `${activeClassCount} classe(s) · Ajouter ou supprimer des classes (coefficients fixes)`,
         icon: ClipboardList,
-        accent: 'bg-violet-100 text-violet-700',
+        accent: 'theme-btn-primary',
       },
       {
-        id: 'bulletins' as ActiveTab,
-        title: 'Bulletins & Suivi',
-        subtitle: 'Générer les bulletins PDF/Word (Collège 3T · Lycée 2S)',
-        icon: FileSpreadsheet,
-        accent: 'bg-violet-100 text-violet-700',
+        id: 'roles' as ActiveTab,
+        title: 'Direction, Profs & Parents (RBAC)',
+        subtitle: `Nommer Censeur, Secrétaire · ${teachersCount} Prof(s) · ${parentsCount} Parent(s)`,
+        icon: Shield,
+        accent: 'theme-pill-soft border',
       },
       {
         id: 'stats' as ActiveTab,
         title: 'Statistiques globales',
         subtitle: 'Effectifs par division, parité, réussite et majors de classe',
         icon: BarChart3,
-        accent: 'bg-violet-100 text-violet-700',
+        accent: 'theme-pill-soft border',
+      },
+      {
+        id: 'archives' as ActiveTab,
+        title: 'Archives annuelles',
+        subtitle: 'Historique des clôtures et promotions annuelles',
+        icon: Archive,
+        accent: 'theme-pill-soft border',
+      },
+      {
+        id: 'audit' as ActiveTab,
+        title: 'Journaux & Sécurité',
+        subtitle: 'Traçabilité des actions, rôles et verrouillage élèves',
+        icon: Shield,
+        accent: 'bg-indigo-100 text-indigo-800',
       },
       {
         id: 'messages' as ActiveTab,
         title: 'Messagerie sécurisée',
-        subtitle: `${messages.length} échange(s) · ${unreadMessages} non lu(s) avec parents et profs`,
+        subtitle: `${messages.length} échange(s) · ${unreadMessages} non lu(s) avec tout l’établissement`,
         icon: MessageSquare,
-        accent: 'bg-indigo-100 text-indigo-700',
+        accent: 'bg-indigo-100 text-indigo-800',
       },
       {
-        id: 'roles' as ActiveTab,
-        title: isCenseur ? 'Enseignants & Parents' : 'Direction, Profs & Parents (RBAC)',
-        subtitle: isCenseur
-          ? `${teachersCount} enseignant(s) · ${parentsCount} parent(s) sous supervision`
-          : `${teachersCount} enseignant(s) · ${parentsCount} parent(s) · Direction adjointe`,
-        icon: Shield,
-        accent: 'bg-emerald-100 text-emerald-700',
+        id: 'notifications' as ActiveTab,
+        title: 'Annonces officielles',
+        subtitle: `Notifier tout l’établissement ou une classe (${notifications.length})`,
+        icon: Megaphone,
+        accent: 'bg-emerald-100 text-emerald-800',
       },
     ];
-    return base;
-  }, [isSecretaire, isCenseur, messages.length, unreadMessages, notifications.length, teachersCount, parentsCount]);
+  }, [isSecretaire, isCenseur, activeClassCount, messages.length, unreadMessages, notifications.length, teachersCount, parentsCount]);
 
   const roleHeaderLabel = isDirector
     ? `Espace Directeur (Admin Suprême) · ${school.schoolName} · ${school.academicYear}`
@@ -344,23 +398,23 @@ function AdminDashboard({
     : `Espace Secrétaire (Inscriptions & Listes) · ${school.schoolName} · ${school.academicYear}`;
 
   const roleGreeting = isDirector
-    ? `Bienvenue, ${school.adminName}. Vous disposez du contrôle complet sur les cycles, rôles, archives et la clôture d’année.`
+    ? `Bienvenue, ${school.adminName}. Pilotez la gouvernance, les nominations, le thème de l’école, les archives et la communication.`
     : isCenseur
     ? `Bienvenue, ${activeMembership?.memberName || 'Censeur'}. Supervisez les notes, les matières, les bulletins et le suivi pédagogique.`
-    : `Bienvenue, ${activeMembership?.memberName || 'Secrétaire'}. Gérez les inscriptions, les listes de classes, les annonces et l’édition PDF.`;
+    : `Bienvenue, ${activeMembership?.memberName || 'Secrétaire'}. Gérez les inscriptions, les listes de classes, la messagerie interne et l’édition PDF.`;
 
   return (
     <div className="space-y-7">
-      {/* Royal Violet & White Hero Banner */}
-      <div className="rounded-2xl bg-gradient-to-r from-violet-950 via-violet-800 to-indigo-900 text-white p-6 shadow-md border border-violet-700/70 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+      {/* Uniform-Themed Hero Banner */}
+      <div className="rounded-2xl theme-surface-header p-6 shadow-md border flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold text-violet-200 mb-1">
+          <p className="text-xs font-semibold theme-header-subtext mb-1">
             {roleHeaderLabel}
           </p>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight text-balance">
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-balance">
             {isSecretaire ? 'Secrétariat académique & listes' : isCenseur ? 'Direction des études & pédagogie' : 'Tableau de pilotage global'}
           </h1>
-          <p className="text-sm text-violet-100/90 mt-1">
+          <p className="text-sm theme-header-subtext mt-1">
             {roleGreeting}
           </p>
         </div>
@@ -370,23 +424,25 @@ function AdminDashboard({
             <button
               onClick={handleSeed}
               disabled={seeding}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/30 bg-white/15 hover:bg-white/25 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border theme-header-chip text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
             >
               <Database className="w-4 h-4" />
               {seeding ? 'Chargement des données...' : 'Charger des données de démonstration'}
             </button>
           )}
-          <button
-            onClick={() => onNavigate('archives')}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/30 bg-white/15 hover:bg-white/25 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
-          >
-            <Archive className="w-4 h-4" />
-            Archives annuelles
-          </button>
+          {(isDirector || isSecretaire) && (
+            <button
+              onClick={() => onNavigate('archives')}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border theme-header-chip text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
+            >
+              <Archive className="w-4 h-4" />
+              Archives annuelles
+            </button>
+          )}
           {isDirector && (
             <button
               onClick={() => onNavigate('audit')}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/30 bg-white/15 hover:bg-white/25 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border theme-header-chip text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
             >
               <Shield className="w-4 h-4" />
               Journaux & Sécurité
@@ -394,9 +450,9 @@ function AdminDashboard({
           )}
           <button
             onClick={() => onNavigate('notifications')}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-violet-100 text-violet-950 text-xs font-bold transition-colors whitespace-nowrap shrink-0 shadow-xs"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl theme-nav-active text-xs font-bold transition-colors whitespace-nowrap shrink-0 shadow-xs"
           >
-            <Megaphone className="w-4 h-4 text-violet-700" />
+            <Megaphone className="w-4 h-4" />
             Publier une annonce ({notifications.length})
           </button>
         </div>
@@ -410,19 +466,19 @@ function AdminDashboard({
 
       {/* Global KPI Strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-gradient-to-br from-white/95 to-violet-100/80 backdrop-blur-xs border border-violet-300/80 rounded-2xl overflow-hidden shadow-xs">
-          <div className="h-1.5 bg-gradient-to-r from-violet-700 to-purple-600" />
+        <div className="bg-white/95 backdrop-blur-xs border theme-border-soft rounded-2xl overflow-hidden shadow-xs">
+          <div className="h-1.5 theme-surface-header" />
           <div className="p-5">
-            <p className="text-xs text-violet-800 font-semibold">Élèves inscrits</p>
-            <p className="mt-2 text-2xl font-extrabold text-violet-950 font-mono-nums">{activeStudents.length}</p>
-            <p className="mt-1 text-xs text-violet-700/80">
+            <p className="text-xs theme-text-accent font-semibold">Élèves inscrits</p>
+            <p className="mt-2 text-2xl font-extrabold theme-text-ink font-mono-nums">{activeStudents.length}</p>
+            <p className="mt-1 text-xs text-zinc-600">
               {activeStudents.filter((s) => s.sexe === 'M').length} G · {activeStudents.filter((s) => s.sexe === 'F').length} F
             </p>
           </div>
         </div>
 
-        <div className="bg-gradient-to-br from-white/95 to-indigo-100/75 backdrop-blur-xs border border-indigo-300/80 rounded-2xl overflow-hidden shadow-xs">
-          <div className="h-1.5 bg-gradient-to-r from-indigo-600 to-violet-700" />
+        <div className="bg-gradient-to-br from-white/95 to-indigo-50/75 backdrop-blur-xs border border-indigo-200/80 rounded-2xl overflow-hidden shadow-xs">
+          <div className="h-1.5 bg-gradient-to-r from-indigo-600 to-blue-600" />
           <div className="p-5">
             <p className="text-xs text-indigo-800 font-semibold">Classes & divisions</p>
             <p className="mt-2 text-2xl font-extrabold text-indigo-950 font-mono-nums">{activeClassCount}</p>
@@ -432,19 +488,19 @@ function AdminDashboard({
           </div>
         </div>
 
-        <div className="bg-gradient-to-br from-white/95 to-purple-100/80 backdrop-blur-xs border border-purple-300/80 rounded-2xl overflow-hidden shadow-xs">
-          <div className="h-1.5 bg-gradient-to-r from-purple-700 to-fuchsia-600" />
+        <div className="bg-gradient-to-br from-white/95 to-amber-50/70 backdrop-blur-xs border border-amber-200/80 rounded-2xl overflow-hidden shadow-xs">
+          <div className="h-1.5 bg-gradient-to-r from-amber-600 to-orange-500" />
           <div className="p-5">
-            <p className="text-xs text-purple-800 font-semibold">Moyenne générale école</p>
-            <p className="mt-2 text-2xl font-extrabold text-violet-800 font-mono-nums">
+            <p className="text-xs text-amber-800 font-semibold">Moyenne générale école</p>
+            <p className="mt-2 text-2xl font-extrabold text-amber-950 font-mono-nums">
               {overallAvg}
-              {overallAvg !== '—' && <span className="text-sm font-normal text-violet-500"> /20</span>}
+              {overallAvg !== '—' && <span className="text-sm font-normal text-amber-600"> /20</span>}
             </p>
-            <p className="mt-1 text-xs text-purple-700/80">{grades.length} notes enregistrées</p>
+            <p className="mt-1 text-xs text-amber-700/80">{grades.length} notes enregistrées</p>
           </div>
         </div>
 
-        <div className="bg-gradient-to-br from-white/95 to-emerald-50/90 backdrop-blur-xs border border-emerald-300/80 rounded-2xl overflow-hidden shadow-xs">
+        <div className="bg-gradient-to-br from-white/95 to-emerald-50/90 backdrop-blur-xs border border-emerald-200/80 rounded-2xl overflow-hidden shadow-xs">
           <div className="h-1.5 bg-gradient-to-r from-emerald-600 to-teal-600" />
           <div className="p-5">
             <p className="text-xs text-emerald-800 font-semibold">Équipe & Familles</p>
@@ -460,7 +516,7 @@ function AdminDashboard({
 
       {/* Main Modules */}
       <div>
-        <h2 className="text-sm font-bold text-violet-950 mb-3">Modules de gestion</h2>
+        <h2 className="text-sm font-bold theme-text-ink mb-3">Modules de gestion</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {primaryActions.map((item, idx) => (
             <ExpressiveModuleCard
@@ -476,25 +532,25 @@ function AdminDashboard({
         </div>
       </div>
 
-      {/* AI Assistant Strip (Directeur & Censeur) */}
-      {!isSecretaire && (
-        <div className="bg-gradient-to-r from-violet-900 via-indigo-900 to-violet-800 text-white border border-violet-700 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
+      {/* AI Assistant Strip (Censeur uniquement dans cet espace) */}
+      {isCenseur && (
+        <div className="theme-surface-header border rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
           <div className="flex items-center gap-3.5">
-            <div className="w-10 h-10 rounded-xl bg-white/15 text-white flex items-center justify-center shrink-0">
+            <div className="w-10 h-10 rounded-xl theme-header-chip border flex items-center justify-center shrink-0">
               <Bot className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-white">
+              <h3 className="text-sm font-bold">
                 Yasmine · Assistante Pédagogique & Numérisation
               </h3>
-              <p className="text-xs text-violet-100/85">
-                Importez une photo de liste manuscrite ou demandez à Yasmine de rédiger vos appréciations.
+              <p className="text-xs theme-header-subtext">
+                Générez vos appréciations de bulletins ou analysez les relevés pédagogiques avec Yasmine.
               </p>
             </div>
           </div>
           <button
             onClick={() => onNavigate('assistant')}
-            className="px-4 py-2 rounded-xl bg-white hover:bg-violet-100 text-violet-950 text-xs font-bold transition-colors whitespace-nowrap shrink-0"
+            className="px-4 py-2 rounded-xl theme-nav-active text-xs font-bold transition-colors whitespace-nowrap shrink-0"
           >
             Parler à Yasmine
           </button>
@@ -562,32 +618,41 @@ function TeacherDashboard({
 
   return (
     <div className="space-y-7">
-      <div className="rounded-2xl bg-gradient-to-r from-indigo-900 via-violet-800 to-purple-900 text-white p-6 shadow-md border border-violet-700/70 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+      <div className="rounded-2xl theme-surface-header p-6 shadow-md border flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold text-violet-200 mb-1">
+          <p className="text-xs font-semibold theme-header-subtext mb-1">
             Espace Enseignant · {school.schoolName} · {teacherRecord?.assignedSubject || 'Corps professoral'}
           </p>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
             Bonjour, {teacherRecord?.memberName || 'Professeur'}
           </h1>
-          <p className="text-sm text-violet-100/90 mt-1">
+          <p className="text-sm theme-header-subtext mt-1">
             Retrouvez uniquement les classes et les élèves dont vous avez la charge cette année ({school.academicYear}).
           </p>
           {titulaireClassNames.length > 0 && (
-            <div className="mt-2.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 border border-white/25 text-xs font-bold text-white">
+            <div className="mt-2.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-full theme-header-chip border text-xs font-bold">
               <UserCheck className="w-3.5 h-3.5" />
               Titulaire de : {titulaireClassNames.join(', ')}
             </div>
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => onNavigate('messages')}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-violet-100 text-violet-950 text-xs font-bold transition-colors whitespace-nowrap shrink-0"
+            type="button"
+            onClick={() => onNavigate('notifications')}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border theme-header-chip text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
           >
-            <MessageSquare className="w-4 h-4 text-violet-700" />
-            Messagerie Parents ({unreadMessages} non lu{unreadMessages > 1 ? 's' : ''})
+            <Bell className="w-4 h-4" />
+            Notifier Censeur / Directeur
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate('messages')}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl theme-nav-active text-xs font-bold transition-colors whitespace-nowrap shrink-0"
+          >
+            <MessageSquare className="w-4 h-4" />
+            Contacter Censeur / Directeur ({unreadMessages})
           </button>
         </div>
       </div>
@@ -595,7 +660,7 @@ function TeacherDashboard({
       {/* Teacher KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-gradient-to-br from-white/95 to-indigo-100/80 backdrop-blur-xs border border-indigo-300/80 rounded-2xl overflow-hidden">
-          <div className="h-1.5 bg-gradient-to-r from-indigo-600 to-violet-700" />
+          <div className="h-1.5 bg-gradient-to-r from-indigo-600 to-blue-700" />
           <div className="p-5">
             <p className="text-xs text-indigo-800 font-semibold">Mes classes assignées</p>
             <p className="mt-2 text-2xl font-extrabold text-indigo-950 font-mono-nums">
@@ -605,12 +670,12 @@ function TeacherDashboard({
           </div>
         </div>
 
-        <div className="bg-gradient-to-br from-white/95 to-violet-100/80 backdrop-blur-xs border border-violet-300/80 rounded-2xl overflow-hidden">
-          <div className="h-1.5 bg-gradient-to-r from-violet-700 to-purple-600" />
+        <div className="bg-white/95 backdrop-blur-xs border theme-border-soft rounded-2xl overflow-hidden">
+          <div className="h-1.5 theme-surface-header" />
           <div className="p-5">
-            <p className="text-xs text-violet-800 font-semibold">Élèves sous ma charge</p>
-            <p className="mt-2 text-2xl font-extrabold text-violet-950 font-mono-nums">{myStudents.length}</p>
-            <p className="mt-1 text-xs text-violet-700/80">Suivi des notes & présences</p>
+            <p className="text-xs theme-text-accent font-semibold">Élèves sous ma charge</p>
+            <p className="mt-2 text-2xl font-extrabold theme-text-ink font-mono-nums">{myStudents.length}</p>
+            <p className="mt-1 text-xs text-zinc-600">Suivi des notes & présences</p>
           </div>
         </div>
 
@@ -637,10 +702,10 @@ function TeacherDashboard({
 
       {/* Assigned Classes Cards */}
       <div>
-        <h2 className="text-sm font-bold text-violet-950 mb-3">Mes classes et cahiers de notes</h2>
+        <h2 className="text-sm font-bold theme-text-ink mb-3">Mes classes et cahiers de notes</h2>
         {effectiveClassNames.length === 0 ? (
-          <div className="bg-violet-50/95 border border-violet-200 rounded-2xl p-8 text-center text-sm text-violet-700">
-            Aucune classe ne vous est encore assignée. Demandez à l’administrateur de configurer votre affectation.
+          <div className="theme-pill-soft border rounded-2xl p-8 text-center text-sm">
+            Aucune classe ne vous est encore assignée. Demandez au Censeur de configurer votre affectation.
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -706,12 +771,12 @@ function TeacherDashboard({
         <div className="p-5 border-b border-zinc-100 flex items-center justify-between">
           <div>
             <h2 className="text-sm font-bold text-zinc-900">Élèves dont vous avez la charge ({myStudents.length})</h2>
-            <p className="text-xs text-zinc-500">Cliquez sur une classe pour saisir les notes ou contacter un parent.</p>
+            <p className="text-xs text-zinc-500">Cliquez sur une classe pour saisir les notes ou signaler une absence au Censeur.</p>
           </div>
           <button
             type="button"
             onClick={() => onNavigate('bulletins')}
-            className="text-xs font-semibold text-violet-700 hover:underline"
+            className="text-xs font-semibold theme-text-accent hover:underline"
           >
             Voir les bulletins →
           </button>
@@ -722,25 +787,25 @@ function TeacherDashboard({
               <tr className="bg-zinc-50 border-b border-zinc-200 text-[11px] font-bold text-zinc-500 uppercase">
                 <th className="py-2.5 px-4">Élève</th>
                 <th className="py-2.5 px-4">Classe</th>
-                <th className="py-2.5 px-4">Parent / Contact</th>
+                <th className="py-2.5 px-4">Tuteur déclaré</th>
                 <th className="py-2.5 px-4 text-right">Accès</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
               {myStudents.slice(0, 10).map((s) => (
-                <tr key={s.id} className="hover:bg-violet-50/30">
+                <tr key={s.id} className="hover:bg-zinc-50/70">
                   <td className="py-2.5 px-4 font-semibold text-zinc-900">
                     {s.nom} {s.prenoms}
                   </td>
-                  <td className="py-2.5 px-4 text-violet-700 font-semibold">{s.classe}</td>
+                  <td className="py-2.5 px-4 theme-text-accent font-semibold">{s.classe}</td>
                   <td className="py-2.5 px-4 text-zinc-500">
-                    {s.guardianName || '—'} {s.parentEmail ? `(${s.parentEmail})` : ''}
+                    {s.guardianName || '—'}
                   </td>
                   <td className="py-2.5 px-4 text-right">
                     <button
                       type="button"
                       onClick={() => onOpenClass(s.classe)}
-                      className="text-xs font-semibold text-violet-700 hover:underline"
+                      className="text-xs font-semibold theme-text-accent hover:underline"
                     >
                       Notes & Absences
                     </button>
@@ -812,16 +877,16 @@ function ParentDashboard({
 
   return (
     <div className="space-y-6 sm:space-y-7">
-      <div className="rounded-2xl bg-gradient-to-r from-violet-950 via-purple-800 to-indigo-900 text-white p-5 sm:p-6 shadow-md border border-violet-700/70 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+      <div className="rounded-2xl theme-surface-header p-5 sm:p-6 shadow-md border flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold text-violet-200 mb-1">
+          <p className="text-xs font-semibold theme-header-subtext mb-1">
             Espace Parent d’élève · {school.schoolName} · {school.academicYear}
           </p>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
             Suivi scolaire de mes enfants
           </h1>
-          <p className="text-sm text-violet-100/90 mt-1">
-            Consultez en temps réel les notes, bulletins, absences et échanges avec les enseignants.
+          <p className="text-sm theme-header-subtext mt-1">
+            Consultez en temps réel les notes, bulletins, absences et échangez directement avec le Censeur.
           </p>
         </div>
 
@@ -829,26 +894,26 @@ function ParentDashboard({
           <button
             type="button"
             onClick={() => onNavigate('notifications')}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/15 border border-white/25 hover:bg-white/25 text-xs font-semibold text-white transition-colors whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border theme-header-chip text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
           >
-            <Bell className="w-4 h-4 text-white" />
-            Notifications ({unreadNotifs} nouvelle{unreadNotifs > 1 ? 's' : ''})
+            <Bell className="w-4 h-4" />
+            Notifier le Censeur ({unreadNotifs})
           </button>
           <button
             type="button"
             onClick={() => onNavigate('messages')}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-violet-100 text-violet-950 text-xs font-bold transition-colors whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl theme-nav-active text-xs font-bold transition-colors whitespace-nowrap shrink-0"
           >
-            <MessageSquare className="w-4 h-4 text-violet-700" />
-            Écrire à un enseignant ({unreadMsgs})
+            <MessageSquare className="w-4 h-4" />
+            Écrire au Censeur ({unreadMsgs})
           </button>
         </div>
       </div>
 
       {myChildren.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-white/95 border border-violet-200/80 rounded-2xl px-4 py-3">
-          <span className="text-xs font-bold text-violet-950">Période affichée :</span>
-          <div className="inline-flex p-1 rounded-xl bg-violet-100/80 border border-violet-200 gap-1">
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-white/95 border theme-border-soft rounded-2xl px-4 py-3">
+          <span className="text-xs font-bold theme-text-ink">Période affichée :</span>
+          <div className="inline-flex p-1 rounded-xl theme-pill-soft border gap-1">
             {periodOptions.map((p) => (
               <button
                 key={p}
@@ -856,8 +921,8 @@ function ParentDashboard({
                 onClick={() => setSelectedPeriod(p)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
                   selectedPeriod === p
-                    ? 'bg-violet-700 text-white shadow-xs'
-                    : 'text-violet-900 hover:bg-white/70'
+                    ? 'theme-btn-primary shadow-xs'
+                    : 'theme-text-ink hover:bg-white/70'
                 }`}
               >
                 {hasCollegeChild ? `Trimestre ${p}` : `Semestre ${p}`}
@@ -869,10 +934,10 @@ function ParentDashboard({
 
       {/* Children Cards */}
       {myChildren.length === 0 ? (
-        <div className="bg-violet-50/95 border border-violet-200 rounded-2xl p-8 sm:p-10 text-center text-sm text-violet-800 space-y-2">
-          <p className="font-bold">Aucun élève n’est encore associé à votre adresse ({actorEmail || 'votre compte'}).</p>
-          <p className="text-xs text-violet-700">
-            Demandez au secrétariat de {school.schoolName} d’enregistrer cette adresse exacte comme e-mail parent sur la fiche de votre enfant.
+        <div className="theme-pill-soft border rounded-2xl p-8 sm:p-10 text-center text-sm space-y-2">
+          <p className="font-bold">Aucun élève n’est encore associé à votre adresse ({formatAuthIdentifierForDisplay(actorEmail) || 'votre compte'}).</p>
+          <p className="text-xs opacity-90">
+            Demandez au secrétariat de {school.schoolName} d’enregistrer cet identifiant exact comme contact parent sur la fiche de votre enfant.
           </p>
         </div>
       ) : (
@@ -916,7 +981,7 @@ function ParentDashboard({
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-violet-700 text-white flex items-center justify-center font-bold text-lg shrink-0">
+                    <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl theme-btn-primary flex items-center justify-center font-bold text-lg shrink-0">
                       <GraduationCap className="w-6 h-6" />
                     </div>
                     <div className="min-w-0">
@@ -924,14 +989,14 @@ function ParentDashboard({
                         {child.nom} {child.prenoms}
                       </h2>
                       <p className="text-xs text-zinc-500">
-                        Classe : <strong className="text-violet-700">{child.classe}</strong> ({child.cycle}) ·{' '}
+                        Classe : <strong className="theme-text-accent">{child.classe}</strong> ({child.cycle}) ·{' '}
                         <span className="font-mono-nums">{child.matricule}</span>
                       </p>
                     </div>
                   </div>
                   <div className="text-left sm:text-right">
                     <p className="text-[11px] text-zinc-500">Moy. {periodFull}</p>
-                    <p className="text-xl font-extrabold text-violet-700 font-mono-nums">
+                    <p className="text-xl font-extrabold theme-text-accent font-mono-nums">
                       {avg !== null ? `${avg.toFixed(2)}/20` : '—'}
                     </p>
                   </div>
@@ -944,10 +1009,10 @@ function ParentDashboard({
                         key={vp}
                         type="button"
                         onClick={() => setSelectedPeriod(vp)}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors border ${
                           childPeriod === vp
-                            ? 'bg-violet-100 text-violet-900 border border-violet-300'
-                            : 'bg-zinc-50 text-zinc-500 border border-zinc-200 hover:text-zinc-800'
+                            ? 'theme-pill-soft'
+                            : 'bg-zinc-50 text-zinc-500 border-zinc-200 hover:text-zinc-800'
                         }`}
                       >
                         {getPeriodShortLabel(child.cycle, vp)}
@@ -956,7 +1021,7 @@ function ParentDashboard({
                   </div>
                 )}
 
-                <div className="grid grid-cols-3 gap-2 sm:gap-3 bg-[#FAF9FE] border border-violet-100 rounded-xl p-3 text-xs">
+                <div className="grid grid-cols-3 gap-2 sm:gap-3 bg-zinc-50/90 border theme-border-soft rounded-xl p-3 text-xs">
                   <div>
                     <span className="text-zinc-500 block">Mention</span>
                     <strong className="text-zinc-900">{mention.label.split(' · ')[0]}</strong>
@@ -1004,7 +1069,7 @@ function ParentDashboard({
                   <button
                     type="button"
                     onClick={() => onOpenBulletin(child.id, childPeriod)}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-xs font-semibold transition-colors"
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl theme-btn-primary text-xs font-semibold transition-colors"
                   >
                     <FileSpreadsheet className="w-3.5 h-3.5" />
                     Consulter & Imprimer le Bulletin
@@ -1012,9 +1077,9 @@ function ParentDashboard({
                   <button
                     type="button"
                     onClick={() => onNavigate('messages')}
-                    className="text-xs font-semibold text-violet-700 hover:underline"
+                    className="text-xs font-semibold theme-text-accent hover:underline"
                   >
-                    Contacter les profs →
+                    Contacter le Censeur →
                   </button>
                 </div>
               </div>
@@ -1030,7 +1095,7 @@ function ParentDashboard({
           <button
             type="button"
             onClick={() => onNavigate('notifications')}
-            className="text-xs font-semibold text-violet-700 hover:underline shrink-0"
+            className="text-xs font-semibold theme-text-accent hover:underline shrink-0"
           >
             Tout voir →
           </button>
@@ -1059,16 +1124,27 @@ function ParentDashboard({
               <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-2">
                   <p className="font-bold text-zinc-900 break-words">{n.title}</p>
-                  {!n.read && (
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {!n.read && (
+                      <button
+                        type="button"
+                        onClick={() => void markNotificationRead(n.id)}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-900 hover:bg-violet-800 text-white text-[10px] font-semibold"
+                      >
+                        <Check className="w-3 h-3" />
+                        Vu
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={() => void markNotificationRead(n.id)}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-900 hover:bg-violet-800 text-white text-[10px] font-semibold shrink-0"
+                      onClick={() => void dismissOrDeleteNotification(n, cleanActor, 'parent')}
+                      title="Supprimer cette notification"
+                      aria-label={`Supprimer la notification ${n.title}`}
+                      className="p-1 rounded-md text-zinc-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
                     >
-                      <Check className="w-3 h-3" />
-                      Vu
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
-                  )}
+                  </div>
                 </div>
                 <p className="text-zinc-600 mt-0.5 break-words">{n.message}</p>
               </div>
@@ -1087,6 +1163,7 @@ interface RoleManagementViewProps {
   uid: string;
   schoolId: string;
   canAssignLeadership?: boolean;
+  canAssignSecretaire?: boolean;
   classrooms: Classroom[];
   students: Student[];
   memberships: Membership[];
@@ -1096,10 +1173,12 @@ export function RoleManagementView({
   uid,
   schoolId,
   canAssignLeadership = false,
+  canAssignSecretaire,
   classrooms,
   students,
   memberships,
 }: RoleManagementViewProps) {
+  const allowSecretaireMgmt = canAssignSecretaire ?? canAssignLeadership;
   const [role, setRole] = useState<MembershipRole>('teacher');
   const [memberEmail, setMemberEmail] = useState('');
   const [memberName, setMemberName] = useState('');
@@ -1182,23 +1261,30 @@ export function RoleManagementView({
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!memberEmail.trim() || !memberName.trim()) return;
-    if ((role === 'censeur' || role === 'secretaire') && !canAssignLeadership) {
+    if (role === 'censeur' && !canAssignLeadership) {
       setFeedback({
         type: 'error',
-        text: 'Seul le Directeur (Admin Suprême) peut nommer un Censeur ou un Secrétaire.',
+        text: 'Seul le Directeur (Admin Suprême) peut nommer un Censeur.',
+      });
+      return;
+    }
+    if (role === 'secretaire' && !allowSecretaireMgmt) {
+      setFeedback({
+        type: 'error',
+        text: 'Seul le Directeur ou le Censeur peut nommer un Secrétaire.',
       });
       return;
     }
 
-    const cleanTargetEmail = memberEmail.trim().toLowerCase();
+    const cleanTargetEmail = normalizeEmail(memberEmail);
     if (isStaffRole) {
       const matchedStudent = students.find(
-        (s) => (s.studentEmail ?? '').trim().toLowerCase() === cleanTargetEmail
+        (s) => normalizeEmail(s.studentEmail) === cleanTargetEmail
       );
       if (matchedStudent) {
         setFeedback({
           type: 'error',
-          text: `Blocage sécurité : l'email ${cleanTargetEmail} est celui de l'élève ${matchedStudent.nom} ${matchedStudent.prenoms} (${matchedStudent.classe}). Un élève de l'école ne peut pas accéder en tant que membre du personnel.`,
+          text: `Blocage sécurité : l'identifiant ${formatAuthIdentifierForDisplay(cleanTargetEmail)} est celui de l'élève ${matchedStudent.nom} ${matchedStudent.prenoms} (${matchedStudent.classe}). Un élève de l'école ne peut pas accéder en tant que membre du personnel.`,
         });
         return;
       }
@@ -1209,7 +1295,7 @@ export function RoleManagementView({
       const mergedClasses =
         role === 'teacher' ? Array.from(new Set([...selectedClasses, ...titulaireClasses])) : [];
       await createMembership(uid, schoolId, {
-        memberEmail,
+        memberEmail: cleanTargetEmail,
         memberName,
         role,
         assignedClasses: mergedClasses,
@@ -1234,7 +1320,7 @@ export function RoleManagementView({
           : 'Parent';
       setFeedback({
         type: 'success',
-        text: `${memberName} (${roleWord}${role === 'teacher' && titulaireClasses.length > 0 ? ` · Titulaire de ${titulaireClasses.join(', ')}` : ''}) ajouté(e) avec succès. À sa connexion (${memberEmail}), son espace personnalisé s'ouvrira automatiquement.`,
+        text: `${memberName} (${roleWord}${role === 'teacher' && titulaireClasses.length > 0 ? ` · Titulaire de ${titulaireClasses.join(', ')}` : ''}) ajouté(e) avec succès. À sa connexion (${formatAuthIdentifierForDisplay(cleanTargetEmail)}), son espace personnalisé s'ouvrira automatiquement.`,
       });
       setMemberEmail('');
       setMemberName('');
@@ -1253,15 +1339,22 @@ export function RoleManagementView({
   };
 
   const handleEditMember = (m: Membership) => {
-    if ((m.role === 'censeur' || m.role === 'secretaire') && !canAssignLeadership) {
+    if (m.role === 'censeur' && !canAssignLeadership) {
       setFeedback({
         type: 'error',
-        text: 'Seul le Directeur peut modifier un Censeur ou un Secrétaire.',
+        text: 'Seul le Directeur peut modifier un Censeur.',
+      });
+      return;
+    }
+    if (m.role === 'secretaire' && !allowSecretaireMgmt) {
+      setFeedback({
+        type: 'error',
+        text: 'Seul le Directeur ou le Censeur peut modifier un Secrétaire.',
       });
       return;
     }
     setRole(m.role);
-    setMemberEmail(m.memberEmail);
+    setMemberEmail(formatAuthIdentifierForDisplay(m.memberEmail));
     setMemberName(m.memberName);
     setAssignedSubject(m.assignedSubject ?? '');
     setSelectedClasses(m.assignedClasses ?? []);
@@ -1276,10 +1369,17 @@ export function RoleManagementView({
   };
 
   const handleRevokeMember = async (m: Membership) => {
-    if ((m.role === 'censeur' || m.role === 'secretaire') && !canAssignLeadership) {
+    if (m.role === 'censeur' && !canAssignLeadership) {
       setFeedback({
         type: 'error',
-        text: 'Seul le Directeur peut révoquer un Censeur ou un Secrétaire.',
+        text: 'Seul le Directeur peut révoquer un Censeur.',
+      });
+      return;
+    }
+    if (m.role === 'secretaire' && !allowSecretaireMgmt) {
+      setFeedback({
+        type: 'error',
+        text: 'Seul le Directeur ou le Censeur peut révoquer un Secrétaire.',
       });
       return;
     }
@@ -1304,15 +1404,19 @@ export function RoleManagementView({
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl bg-gradient-to-r from-violet-950 via-violet-800 to-indigo-900 text-white p-6 shadow-md border border-violet-700/70">
-        <h1 className="text-xl font-extrabold text-white">
+      <div className="rounded-2xl theme-surface-header p-6 shadow-md border">
+        <h1 className="text-xl font-extrabold">
           {canAssignLeadership
             ? 'Gestion hiérarchique des rôles (Censeur, Secrétaire, Profs & Parents)'
+            : allowSecretaireMgmt
+            ? 'Gestion de l’équipe (Secrétaire, Enseignants & Parents)'
             : 'Gestion des Enseignants & Parents (RBAC)'}
         </h1>
-        <p className="text-xs text-violet-100/90 mt-1">
+        <p className="text-xs theme-header-subtext mt-1">
           {canAssignLeadership
-            ? 'Nommez votre Censeur (pédagogie & notes), votre Secrétaire (inscriptions & listes), assignez les classes aux professeurs et liez les parents.'
+            ? 'Nommez un ou plusieurs Censeurs (pédagogie & notes), le Secrétaire (inscriptions & listes), assignez les classes aux professeurs et liez les parents.'
+            : allowSecretaireMgmt
+            ? 'Nommez et gérez la Secrétaire de l’établissement, assignez les classes aux professeurs et liez les parents à leurs enfants.'
             : 'Assignez les classes aux enseignants et liez les parents à leurs enfants pour activer leurs tableaux de bord personnalisés.'}
         </p>
       </div>
@@ -1331,43 +1435,43 @@ export function RoleManagementView({
 
       <form
         onSubmit={handleAddMember}
-        className="bg-violet-50/90 backdrop-blur-xs border border-violet-300/80 rounded-2xl p-6 space-y-5 shadow-xs"
+        className="bg-white/95 backdrop-blur-xs border theme-border-soft rounded-2xl p-6 space-y-5 shadow-xs"
       >
         <div className="flex flex-wrap items-center gap-2">
           {canAssignLeadership && (
-            <>
-              <button
-                type="button"
-                onClick={() => setRole('censeur')}
-                className={`px-4 py-2 rounded-xl text-xs font-semibold border transition-all ${
-                  role === 'censeur'
-                    ? 'bg-purple-700 text-white border-purple-700'
-                    : 'bg-white text-zinc-700 border-zinc-200'
-                }`}
-              >
-                <UserCheck className="w-3.5 h-3.5 inline mr-1.5" />
-                Nommer un Censeur
-              </button>
-              <button
-                type="button"
-                onClick={() => setRole('secretaire')}
-                className={`px-4 py-2 rounded-xl text-xs font-semibold border transition-all ${
-                  role === 'secretaire'
-                    ? 'bg-amber-600 text-white border-amber-600'
-                    : 'bg-white text-zinc-700 border-zinc-200'
-                }`}
-              >
-                <Briefcase className="w-3.5 h-3.5 inline mr-1.5" />
-                Nommer un Secrétaire
-              </button>
-            </>
+            <button
+              type="button"
+              onClick={() => setRole('censeur')}
+              className={`px-4 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                role === 'censeur'
+                  ? 'bg-purple-700 text-white border-purple-700'
+                  : 'bg-white text-zinc-700 border-zinc-200'
+              }`}
+            >
+              <UserCheck className="w-3.5 h-3.5 inline mr-1.5" />
+              Nommer un Censeur
+            </button>
+          )}
+          {allowSecretaireMgmt && (
+            <button
+              type="button"
+              onClick={() => setRole('secretaire')}
+              className={`px-4 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                role === 'secretaire'
+                  ? 'bg-amber-600 text-white border-amber-600'
+                  : 'bg-white text-zinc-700 border-zinc-200'
+              }`}
+            >
+              <Briefcase className="w-3.5 h-3.5 inline mr-1.5" />
+              Nommer un Secrétaire
+            </button>
           )}
           <button
             type="button"
             onClick={() => setRole('teacher')}
             className={`px-4 py-2 rounded-xl text-xs font-semibold border transition-all ${
               role === 'teacher'
-                ? 'bg-violet-700 text-white border-violet-700'
+                ? 'theme-btn-primary border-transparent'
                 : 'bg-white text-zinc-700 border-zinc-200'
             }`}
           >
@@ -1379,7 +1483,7 @@ export function RoleManagementView({
             onClick={() => setRole('parent')}
             className={`px-4 py-2 rounded-xl text-xs font-semibold border transition-all ${
               role === 'parent'
-                ? 'bg-violet-700 text-white border-violet-700'
+                ? 'theme-btn-primary border-transparent'
                 : 'bg-white text-zinc-700 border-zinc-200'
             }`}
           >
@@ -1389,14 +1493,14 @@ export function RoleManagementView({
         </div>
 
         {(role === 'censeur' || role === 'secretaire') && (
-          <div className="p-3 rounded-xl bg-white border border-violet-200 text-xs text-zinc-700">
+          <div className="p-3 rounded-xl theme-pill-soft border text-xs">
             {role === 'censeur' ? (
               <span>
-                <strong>Droits du Censeur :</strong> accès complet aux notes, matières, appréciations de bulletins, statistiques, Yasmine IA, classes et gestion des enseignants/parents (sans clôture d’année ni suppression de l’école).
+                <strong>Droits du Censeur :</strong> pédagogie, notes, matières, appréciations de bulletins, statistiques, Yasmine IA, ajout/gestion des Secrétaires, Enseignants et Parents, et communication avec tout l’établissement (sans accès au panel Secrétaire ni suppression de l’école).
               </span>
             ) : (
               <span>
-                <strong>Droits du Secrétaire :</strong> inscriptions, dossiers élèves, création/suppression de classes, annonces, messagerie et impression PDF des bulletins. Notes et matières restent protégées en lecture seule.
+                <strong>Droits du Secrétaire :</strong> inscriptions, dossiers élèves, création/suppression de classes, impression PDF des bulletins et notifications/messages vers Directeur, Censeur et Professeurs (aucun envoi vers les parents, notes en lecture seule).
               </span>
             )}
           </div>
@@ -1423,13 +1527,13 @@ export function RoleManagementView({
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-zinc-700 mb-1">Email de connexion *</label>
+            <label className="block text-xs font-semibold text-zinc-700 mb-1">N° de téléphone ou E-mail de connexion *</label>
             <input
-              type="email"
+              type="text"
               required
               value={memberEmail}
               onChange={(e) => setMemberEmail(e.target.value)}
-              placeholder="compte@exemple.com"
+              placeholder="90 12 34 56 ou compte@exemple.com"
               className="w-full px-3.5 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none focus:border-violet-600"
             />
           </div>
@@ -1463,8 +1567,8 @@ export function RoleManagementView({
                       onClick={() => toggleClass(c.name)}
                       className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
                         active
-                          ? 'bg-violet-700 text-white border-violet-700'
-                          : 'bg-white text-zinc-700 border-zinc-200 hover:border-violet-300'
+                          ? 'theme-btn-primary border-transparent'
+                          : 'bg-white text-zinc-700 border-zinc-200 hover:border-zinc-400'
                       }`}
                     >
                       {c.name}
@@ -1481,7 +1585,7 @@ export function RoleManagementView({
               <p className="text-[11px] text-zinc-500 mb-2">
                 Optionnel : désignez cet enseignant comme Titulaire d’une ou plusieurs classes (affiché sur les bulletins).
               </p>
-              <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto p-3 rounded-xl border border-violet-200 bg-white">
+              <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto p-3 rounded-xl border theme-border-soft bg-white">
                 {sortedClassrooms.map((c) => {
                   const isTit = titulaireClasses.includes(c.name);
                   return (
@@ -1492,7 +1596,7 @@ export function RoleManagementView({
                       className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
                         isTit
                           ? 'bg-indigo-700 text-white border-indigo-700'
-                          : 'bg-zinc-50 text-zinc-700 border-zinc-200 hover:border-violet-300'
+                          : 'bg-zinc-50 text-zinc-700 border-zinc-200 hover:border-zinc-400'
                       }`}
                     >
                       <UserCheck className="w-3 h-3" />
@@ -1542,7 +1646,7 @@ export function RoleManagementView({
           <button
             type="submit"
             disabled={saving}
-            className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-xs font-semibold disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl theme-btn-primary text-xs font-semibold disabled:opacity-60"
           >
             <Plus className="w-4 h-4" />
             {saving ? 'Enregistrement...' : 'Enregistrer l’accès'}
@@ -1561,7 +1665,9 @@ export function RoleManagementView({
             {memberships.map((m) => {
               const badge = roleBadge(m.role);
               const canRevokeThis =
-                canAssignLeadership || (m.role !== 'censeur' && m.role !== 'secretaire');
+                canAssignLeadership ||
+                (m.role === 'secretaire' && allowSecretaireMgmt) ||
+                (m.role !== 'censeur' && m.role !== 'secretaire');
               const memberTitulaireClasses =
                 m.role === 'teacher'
                   ? sortedClassrooms.filter((c) => isTeacherTitulaire(c, m)).map((c) => c.name)
@@ -1571,12 +1677,12 @@ export function RoleManagementView({
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-bold text-zinc-900">{m.memberName}</span>
-                      <span className="text-zinc-500">({m.memberEmail})</span>
+                      <span className="text-zinc-500">({formatAuthIdentifierForDisplay(m.memberEmail)})</span>
                       <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold ${badge.cls}`}>
                         {badge.label}
                       </span>
                       {memberTitulaireClasses.length > 0 && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-violet-100 text-violet-900 border border-violet-200">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold theme-pill-soft border">
                           <UserCheck className="w-3 h-3" />
                           Titulaire : {memberTitulaireClasses.join(', ')}
                         </span>
@@ -1586,9 +1692,9 @@ export function RoleManagementView({
                       {m.role === 'teacher'
                         ? `${m.assignedSubject || 'Matière non précisée'} · Classes : ${(m.assignedClasses ?? []).join(', ') || 'Aucune'}`
                         : m.role === 'censeur'
-                        ? 'Accès établissement complet : pédagogie, notes, matières, bulletins & stats'
+                        ? 'Accès pédagogique complet : notes, matières, bulletins, stats & communication tout l’établissement'
                         : m.role === 'secretaire'
-                        ? 'Accès secrétariat : inscriptions, dossiers élèves, listes & impression PDF'
+                        ? 'Accès secrétariat : inscriptions, dossiers élèves, listes, PDF & communication équipe'
                         : `Enfant(s) lié(s) : ${(m.childStudentIds ?? []).length}`}
                     </p>
                   </div>
@@ -1597,7 +1703,7 @@ export function RoleManagementView({
                       <button
                         type="button"
                         onClick={() => handleEditMember(m)}
-                        className="p-2 rounded-lg text-zinc-400 hover:text-violet-700 hover:bg-violet-50"
+                        className="p-2 rounded-lg text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100"
                         title="Modifier l’accès"
                       >
                         <Pencil className="w-4 h-4" />
@@ -1630,7 +1736,7 @@ export function RoleManagementView({
               Attribuez rapidement un enseignant titulaire à chaque division (affiché dans les classes et sur les bulletins).
             </p>
           </div>
-          <span className="px-3 py-1 rounded-full bg-violet-50 border border-violet-200 text-xs font-bold text-violet-900 self-start sm:self-auto">
+          <span className="px-3 py-1 rounded-full theme-pill-soft border text-xs font-bold self-start sm:self-auto">
             {sortedClassrooms.filter((c) => Boolean(c.headTeacher?.trim())).length} / {sortedClassrooms.length} assigné(s)
           </span>
         </div>
@@ -1641,7 +1747,7 @@ export function RoleManagementView({
             return (
               <div key={cls.id} className="px-5 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                 <div className="flex items-center gap-2.5">
-                  <span className="px-2.5 py-1 rounded-lg bg-violet-50 text-violet-900 font-extrabold">
+                  <span className="px-2.5 py-1 rounded-lg theme-pill-soft border font-extrabold">
                     {cls.name}
                   </span>
                   <span className="text-zinc-500">{cls.cycle}</span>
@@ -1660,7 +1766,7 @@ export function RoleManagementView({
                     value={matched ? matched.memberEmail : '__none__'}
                     disabled={updatingTitulaireId === cls.id}
                     onChange={(e) => handleAssignTitulaireRow(cls, e.target.value)}
-                    className="px-3 py-1.5 rounded-xl border border-zinc-200 bg-white text-xs font-semibold text-zinc-800 outline-none focus:border-violet-600 disabled:opacity-60"
+                    className="px-3 py-1.5 rounded-xl border border-zinc-200 bg-white text-xs font-semibold text-zinc-800 outline-none theme-input disabled:opacity-60"
                   >
                     <option value="__none__">— Aucun titulaire —</option>
                     {teacherMemberships.map((t) => (

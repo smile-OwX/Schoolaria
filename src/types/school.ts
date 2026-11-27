@@ -19,33 +19,37 @@ export const ROLE_SHORT_LABELS: Record<UserRole, string> = {
   parent: 'Parent',
 };
 
+import type { SchoolUniformTheme } from '../lib/schoolTheme.ts';
+export type { SchoolUniformTheme } from '../lib/schoolTheme.ts';
+import {
+  canBatchPrintBulletinsForRole,
+  canChangeSchoolThemeForRole,
+  canEditBulletinsForRole,
+  canEditGradesForRole,
+  canManageClassesForRole,
+  canManageLeadershipForRole,
+  canManageStudentsForRole,
+  canManageSubjectsForRole,
+  canManageTitulaireForRole,
+  canManageYearLifecycleForRole,
+  canNotifyParentsForRole,
+} from '../lib/rolePermissions.ts';
+
 export function isSchoolWideStaffRole(role: UserRole): boolean {
   return role === 'admin' || role === 'censeur' || role === 'secretaire';
 }
 
-export function canEditGrades(role: UserRole): boolean {
-  return role === 'admin' || role === 'censeur' || role === 'teacher';
-}
-
-export function canManageSubjects(role: UserRole): boolean {
-  return role === 'admin' || role === 'censeur';
-}
-
-export function canManageStudents(role: UserRole): boolean {
-  return role === 'admin' || role === 'censeur' || role === 'secretaire';
-}
-
-export function canManageClasses(role: UserRole): boolean {
-  return role === 'admin' || role === 'censeur' || role === 'secretaire';
-}
-
-export function canManageLeadership(role: UserRole): boolean {
-  return role === 'admin';
-}
-
-export function canManageYearLifecycle(role: UserRole): boolean {
-  return role === 'admin';
-}
+export const canEditGrades = canEditGradesForRole;
+export const canManageSubjects = canManageSubjectsForRole;
+export const canManageStudents = canManageStudentsForRole;
+export const canManageClasses = canManageClassesForRole;
+export const canManageTitulaire = canManageTitulaireForRole;
+export const canEditBulletins = canEditBulletinsForRole;
+export const canBatchPrintBulletins = canBatchPrintBulletinsForRole;
+export const canManageLeadership = canManageLeadershipForRole;
+export const canManageYearLifecycle = canManageYearLifecycleForRole;
+export const canChangeSchoolTheme = canChangeSchoolThemeForRole;
+export const canNotifyParents = canNotifyParentsForRole;
 
 export interface ClassDefinition {
   name: string;
@@ -234,6 +238,31 @@ export const LEVEL_SUGGESTIONS: Record<CycleType, string[]> = {
   Collège: ['6ème', '5ème', '4ème', '3ème'],
   Lycée: ['2nde', '1ère', 'Terminale'],
 };
+
+export interface ClassPresetOption {
+  name: string;
+  level: string;
+  cycle: CycleType;
+  series: string;
+  motif: ClassroomMotif;
+  accentColor: string;
+}
+
+export const STANDARD_CLASS_PRESETS: readonly ClassPresetOption[] = [
+  { name: '6e A', level: '6ème', cycle: 'Collège', series: 'Section A · Adaptation', motif: 'general', accentColor: '#6d28d9' },
+  { name: '6e B', level: '6ème', cycle: 'Collège', series: 'Section B · Langues', motif: 'lettres-philo', accentColor: '#4338ca' },
+  { name: '5e', level: '5ème', cycle: 'Collège', series: 'Cycle Collège · Observation', motif: 'sciences-nat', accentColor: '#0f766e' },
+  { name: '4e', level: '4ème', cycle: 'Collège', series: 'Cycle Collège · Sciences', motif: 'maths-physique', accentColor: '#7c3aed' },
+  { name: '3e', level: '3ème', cycle: 'Collège', series: 'Objectif BEPC', motif: 'maths-physique', accentColor: '#5b21b6' },
+  { name: '2nde A', level: '2nde', cycle: 'Lycée', series: 'Série A · Lettres & Langues', motif: 'lettres-philo', accentColor: '#b45309' },
+  { name: '2nde CD', level: '2nde', cycle: 'Lycée', series: 'Séries C/D · Sciences', motif: 'maths-physique', accentColor: '#4338ca' },
+  { name: '1re A4', level: '1ère', cycle: 'Lycée', series: 'Série A · Lettres & Philo', motif: 'lettres-philo', accentColor: '#be123c' },
+  { name: '1re C', level: '1ère', cycle: 'Lycée', series: 'Série C · Maths & Physique', motif: 'maths-physique', accentColor: '#0284c7' },
+  { name: '1re D', level: '1ère', cycle: 'Lycée', series: 'Série D · SVT & Sciences', motif: 'sciences-nat', accentColor: '#047857' },
+  { name: 'Tle A4', level: 'Terminale', cycle: 'Lycée', series: 'Série A · Philo & Lettres', motif: 'lettres-philo', accentColor: '#9f1239' },
+  { name: 'Tle C', level: 'Terminale', cycle: 'Lycée', series: 'Série C · Maths & Physique', motif: 'maths-physique', accentColor: '#4f46e5' },
+  { name: 'Tle D', level: 'Terminale', cycle: 'Lycée', series: 'Série D · Sciences Exp.', motif: 'sciences-nat', accentColor: '#5b21b6' },
+];
 
 export function getCycleForClass(classe: string, classrooms?: Classroom[]): CycleType {
   const fromDynamic = classrooms?.find((c) => c.name === classe);
@@ -547,6 +576,11 @@ export interface SchoolProfile {
   address?: string;
   city?: string;
   registrationCode?: string;
+  theme?: SchoolUniformTheme;
+  ownerEmail?: string;
+  censeurEmails?: string[];
+  censeurNames?: string[];
+  teacherEmails?: string[];
   memberEmails?: string[];
   staffEmails?: string[];
   createdAt?: unknown;
@@ -748,6 +782,22 @@ export interface MessageItem {
   updatedAt?: unknown;
 }
 
+export type NotificationDurationPreset = '24h' | '3d' | '7d' | '30d' | 'permanent';
+
+export interface NotificationDurationOption {
+  id: NotificationDurationPreset;
+  label: string;
+  durationMs: number | null;
+}
+
+export const NOTIFICATION_DURATION_OPTIONS: readonly NotificationDurationOption[] = [
+  { id: 'permanent', label: 'Permanent (jusqu’à suppression manuelle)', durationMs: null },
+  { id: '24h', label: '24 heures', durationMs: 24 * 60 * 60 * 1000 },
+  { id: '3d', label: '3 jours', durationMs: 3 * 24 * 60 * 60 * 1000 },
+  { id: '7d', label: '7 jours', durationMs: 7 * 24 * 60 * 60 * 1000 },
+  { id: '30d', label: '30 jours', durationMs: 30 * 24 * 60 * 60 * 1000 },
+];
+
 export interface NotificationItem {
   id: string;
   ownerId: string;
@@ -758,11 +808,77 @@ export interface NotificationItem {
   targetClasse?: string;
   studentId?: string;
   audienceEmails: string[];
+  dismissedByEmails?: string[];
   createdByEmail: string;
   createdByName: string;
+  createdByRole?: UserRole;
   read: boolean;
+  expiresAt?: unknown;
   createdAt?: unknown;
   updatedAt?: unknown;
+}
+
+export function getTimestampMs(ts: unknown): number | null {
+  if (ts === null || ts === undefined || ts === '') return null;
+  if (ts instanceof Date) {
+    const ms = ts.getTime();
+    return Number.isNaN(ms) ? null : ms;
+  }
+  if (typeof ts === 'number') {
+    return Number.isFinite(ts) ? ts : null;
+  }
+  if (typeof ts === 'string') {
+    const ms = Date.parse(ts);
+    return Number.isNaN(ms) ? null : ms;
+  }
+  if (typeof ts === 'object') {
+    const maybe = ts as { toMillis?: () => number; toDate?: () => Date; seconds?: number };
+    if (typeof maybe.toMillis === 'function') {
+      const ms = maybe.toMillis();
+      return Number.isFinite(ms) ? ms : null;
+    }
+    if (typeof maybe.toDate === 'function') {
+      const ms = maybe.toDate().getTime();
+      return Number.isNaN(ms) ? null : ms;
+    }
+    if (typeof maybe.seconds === 'number' && Number.isFinite(maybe.seconds)) {
+      return maybe.seconds * 1000;
+    }
+  }
+  return null;
+}
+
+export function computeNotificationExpiresAt(
+  preset: NotificationDurationPreset,
+  nowMs: number = Date.now()
+): Date | null {
+  const option = NOTIFICATION_DURATION_OPTIONS.find((o) => o.id === preset);
+  if (!option || option.durationMs === null) return null;
+  return new Date(nowMs + option.durationMs);
+}
+
+export function isNotificationExpired(
+  notif: Pick<NotificationItem, 'expiresAt'>,
+  nowMs: number = Date.now()
+): boolean {
+  const expMs = getTimestampMs(notif.expiresAt);
+  if (expMs === null) return false;
+  return expMs <= nowMs;
+}
+
+export function isNotificationVisibleForUser(
+  notif: Pick<NotificationItem, 'expiresAt' | 'dismissedByEmails'>,
+  userEmail?: string | null,
+  nowMs: number = Date.now()
+): boolean {
+  if (isNotificationExpired(notif, nowMs)) return false;
+  const cleanUser = (userEmail ?? '').trim().toLowerCase();
+  if (cleanUser && Array.isArray(notif.dismissedByEmails)) {
+    if (notif.dismissedByEmails.some((e) => (e ?? '').trim().toLowerCase() === cleanUser)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export const DEFAULT_SUBJECTS_BY_CYCLE: Record<CycleType, Array<{ name: string; coef: number }>> = {
@@ -863,10 +979,10 @@ export function parseTogoClassProfile(classe: string, classroom?: Classroom): To
     else if (/\b(1er|1ere|1re|premiere)\b/.test(combined)) level = '1re';
 
     let series: 'A' | 'C' | 'D' | 'CD' = 'D';
-    if (/\bcd\b|c\/d|c-d/.test(cleanClasse) || /\bcd\b|c\/d|c-d/.test(cleanMeta)) series = 'CD';
-    else if (/\ba4?\b/.test(cleanClasse) || /\b(?:serie|section)\s+a4?\b|\ba4\b|litteraire/.test(cleanMeta)) series = 'A';
-    else if (/\bc\b/.test(cleanClasse) || /\b(?:serie|section)\s+c\b/.test(cleanMeta)) series = 'C';
-    else if (/\bd\b/.test(cleanClasse) || /\b(?:serie|section)\s+d\b/.test(cleanMeta)) series = 'D';
+    if (/\bcd[1-9]?\b|c\/d|c-d/.test(cleanClasse) || /\bcd[1-9]?\b|c\/d|c-d/.test(cleanMeta)) series = 'CD';
+    else if (/\ba(?:4|[1-9])?\b/.test(cleanClasse) || /\b(?:serie|section)\s+a(?:4|[1-9])?\b|\ba4\b|litteraire/.test(cleanMeta)) series = 'A';
+    else if (/\bc[1-9]?\b/.test(cleanClasse) || /\b(?:serie|section)\s+c[1-9]?\b/.test(cleanMeta)) series = 'C';
+    else if (/\bd[1-9]?\b/.test(cleanClasse) || /\b(?:serie|section)\s+d[1-9]?\b/.test(cleanMeta)) series = 'D';
     else if (level === '2nde') series = 'CD';
 
     return { cycle: 'Lycée', level, series };
@@ -1122,6 +1238,54 @@ export function getEffectiveSubjectsForClass(
     if (orderA !== orderB) return orderA - orderB;
     return a.name.localeCompare(b.name);
   });
+}
+
+export interface FixedSubjectPreview {
+  name: string;
+  coef: number;
+}
+
+export function buildFixedSubjectsPreviewForClass(
+  classe: string,
+  existingSubjects: Subject[] = [],
+  classroomMeta?: { level?: string; cycle?: CycleType; series?: string }
+): FixedSubjectPreview[] {
+  const virtualClassroom: Classroom | undefined = classroomMeta?.cycle
+    ? {
+        id: 'preview',
+        ownerId: 'preview',
+        schoolId: 'preview',
+        name: classe,
+        level: classroomMeta.level ?? classe,
+        cycle: classroomMeta.cycle,
+        series: classroomMeta.series,
+        motif: 'general',
+        accentColor: '#6d28d9',
+      }
+    : undefined;
+  const profile = parseTogoClassProfile(classe, virtualClassroom);
+  const existingForCycle = existingSubjects.filter((s) => s.cycle === profile.cycle);
+  const existingKeys = new Set(existingForCycle.map((s) => normalizeSubjectKey(s.name)));
+
+  const mergedSubjects: Subject[] = [...existingForCycle];
+  DEFAULT_SUBJECTS_BY_CYCLE[profile.cycle].forEach((def, idx) => {
+    const key = normalizeSubjectKey(def.name);
+    if (!existingKeys.has(key)) {
+      mergedSubjects.push({
+        id: `std_${profile.cycle}_${idx}`,
+        ownerId: 'std',
+        schoolId: 'std',
+        name: def.name,
+        cycle: profile.cycle,
+        coef: def.coef,
+      });
+    }
+  });
+
+  return getEffectiveSubjectsForClass(classe, mergedSubjects, virtualClassroom).map((s) => ({
+    name: s.name,
+    coef: s.coef,
+  }));
 }
 
 export function computeMoyClasse(grade: Pick<GradeRecord, 'int1' | 'int2' | 'devoir'>): number | null {

@@ -1,7 +1,11 @@
 import type { Membership, Student } from '../types/school.ts';
+import { resolveIdentifierToAuthEmail } from './phoneAuth.ts';
 
 function cleanEmail(raw?: string | null): string {
-  return (raw ?? '').trim().toLowerCase();
+  const trimmed = (raw ?? '').trim();
+  if (!trimmed) return '';
+  const resolved = resolveIdentifierToAuthEmail(trimmed);
+  return resolved.authEmail || trimmed.toLowerCase();
 }
 
 export function filterChildrenForParent(options: {
@@ -28,7 +32,9 @@ export function filterChildrenForParent(options: {
     const matched = pool.filter(
       (s) =>
         childIds.has(s.id) ||
-        (Boolean(targetEmail) && cleanEmail(s.parentEmail) === targetEmail)
+        (Boolean(targetEmail) &&
+          (cleanEmail(s.parentEmail) === targetEmail ||
+            cleanEmail(s.guardianPhone) === targetEmail))
     );
     if (matched.length > 0) return matched;
   }

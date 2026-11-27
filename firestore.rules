@@ -25,10 +25,19 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isPhoneAuthUser() {
+      return isSignedIn()
+        && request.auth.token.email is string
+        && request.auth.token.email.lower().matches('^tel\\.[0-9]{7,15}@tel\\.schoolaria\\.app$');
+    }
+
     function isVerifiedUser() {
       return isSignedIn()
-        && request.auth.token.email_verified == true
-        && request.auth.token.email is string;
+        && request.auth.token.email is string
+        && (
+          request.auth.token.email_verified == true ||
+          isPhoneAuthUser()
+        );
     }
 
     function authEmail() {
@@ -97,17 +106,107 @@ service cloud.firestore {
       );
     }
 
+    function schoolDoc(schoolId) {
+      return get(/databases/$(database)/documents/schools/$(schoolId)).data;
+    }
+
+    function canManageEnrollmentsInSchool(schoolId, docOwnerId) {
+      return schoolBelongsToOwner(schoolId, docOwnerId) && (
+        schoolDoc(schoolId).ownerId == request.auth.uid ||
+        isSecretaireInSchool(schoolId)
+      );
+    }
+
+    function canManageClassesInSchool(schoolId, docOwnerId) {
+      return schoolBelongsToOwner(schoolId, docOwnerId) && (
+        schoolDoc(schoolId).ownerId == request.auth.uid ||
+        isCenseurInSchool(schoolId) ||
+        isSecretaireInSchool(schoolId)
+      );
+    }
+
     function canManageStudentsInSchool(schoolId, docOwnerId) {
       return schoolBelongsToOwner(schoolId, docOwnerId) && (
-        get(/databases/$(database)/documents/schools/$(schoolId)).data.ownerId == request.auth.uid ||
+        schoolDoc(schoolId).ownerId == request.auth.uid ||
         isManagementInSchool(schoolId)
       );
     }
 
     function canManagePedagogyInSchool(schoolId, docOwnerId) {
       return schoolBelongsToOwner(schoolId, docOwnerId) && (
-        get(/databases/$(database)/documents/schools/$(schoolId)).data.ownerId == request.auth.uid ||
+        schoolDoc(schoolId).ownerId == request.auth.uid ||
         isCenseurInSchool(schoolId)
+      );
+    }
+
+    function isRecipientCenseurInSchool(schoolId, email) {
+      let sch = schoolDoc(schoolId);
+      return email is string
+        && email.size() >= 3
+        && (
+          ('censeurEmails' in sch && email in sch.censeurEmails) ||
+          exists(/databases/$(database)/documents/memberships/$(('mem_' + schoolId + '_censeur_' + safeEmailKey(email))))
+        );
+    }
+
+    function isRecipientDirectorInSchool(schoolId, email) {
+      let sch = schoolDoc(schoolId);
+      return email is string
+        && email.size() >= 3
+        && 'ownerEmail' in sch
+        && sch.ownerEmail is string
+        && sch.ownerEmail == email;
+    }
+
+    function isRecipientTeacherInSchool(schoolId, email) {
+      let sch = schoolDoc(schoolId);
+      return email is string
+        && email.size() >= 3
+        && (
+          ('teacherEmails' in sch && email in sch.teacherEmails) ||
+          exists(/databases/$(database)/documents/memberships/$(('mem_' + schoolId + '_teacher_' + safeEmailKey(email))))
+        );
+    }
+
+    function allowedLeadershipEmails(schoolId) {
+      let sch = schoolDoc(schoolId);
+      let dirs = ('ownerEmail' in sch && sch.ownerEmail is string && sch.ownerEmail.size() >= 3) ? [sch.ownerEmail] : [];
+      let cens = ('censeurEmails' in sch && sch.censeurEmails is list) ? sch.censeurEmails : [];
+      return dirs.concat(cens);
+    }
+
+    function allowedSecretaireTargetEmails(schoolId) {
+      let sch = schoolDoc(schoolId);
+      let teas = ('teacherEmails' in sch && sch.teacherEmails is list) ? sch.teacherEmails : [];
+      return allowedLeadershipEmails(schoolId).concat(teas);
+    }
+
+    function audienceOnlyCenseurTargets(schoolId, audience) {
+      let sch = schoolDoc(schoolId);
+      let cens = ('censeurEmails' in sch && sch.censeurEmails is list) ? sch.censeurEmails : [];
+      return audience.size() >= 1 && (
+        (cens.size() > 0 && audience.hasOnly(cens)) ||
+        (audience.size() == 1 && isRecipientCenseurInSchool(schoolId, audience[0]))
+      );
+    }
+
+    function audienceOnlyLeadershipTargets(schoolId, audience) {
+      let allowed = allowedLeadershipEmails(schoolId);
+      return audience.size() >= 1 && (
+        (allowed.size() > 0 && audience.hasOnly(allowed)) ||
+        (audience.size() == 1 && (isRecipientCenseurInSchool(schoolId, audience[0]) || isRecipientDirectorInSchool(schoolId, audience[0])))
+      );
+    }
+
+    function audienceOnlySecretaireTargets(schoolId, audience) {
+      let allowed = allowedSecretaireTargetEmails(schoolId);
+      return audience.size() >= 1 && (
+        (allowed.size() > 0 && audience.hasOnly(allowed)) ||
+        (audience.size() == 1 && (
+          isRecipientCenseurInSchool(schoolId, audience[0]) ||
+          isRecipientDirectorInSchool(schoolId, audience[0]) ||
+          isRecipientTeacherInSchool(schoolId, audience[0])
+        ))
       );
     }
 
@@ -136,20 +235,20 @@ service cloud.firestore {
 
     function canWriteInSchool(schoolId, docOwnerId) {
       return schoolBelongsToOwner(schoolId, docOwnerId) && (
-        get(/databases/$(database)/documents/schools/$(schoolId)).data.ownerId == request.auth.uid ||
-        ('memberEmails' in get(/databases/$(database)/documents/schools/$(schoolId)).data && authEmail() in get(/databases/$(database)/documents/schools/$(schoolId)).data.memberEmails) ||
+        schoolDoc(schoolId).ownerId == request.auth.uid ||
+        ('memberEmails' in schoolDoc(schoolId) && authEmail() in schoolDoc(schoolId).memberEmails) ||
         isMemberByDocId(schoolId)
       );
     }
 
     function canStaffWriteInSchool(schoolId, docOwnerId) {
       return schoolBelongsToOwner(schoolId, docOwnerId) && (
-        get(/databases/$(database)/documents/schools/$(schoolId)).data.ownerId == request.auth.uid ||
+        schoolDoc(schoolId).ownerId == request.auth.uid ||
         isCenseurInSchool(schoolId) ||
         isSecretaireInSchool(schoolId) ||
         (
           !isStudentLockedInSchool(schoolId) && (
-            ('staffEmails' in get(/databases/$(database)/documents/schools/$(schoolId)).data && authEmail() in get(/databases/$(database)/documents/schools/$(schoolId)).data.staffEmails) ||
+            ('staffEmails' in schoolDoc(schoolId) && authEmail() in schoolDoc(schoolId).staffEmails) ||
             exists(/databases/$(database)/documents/memberships/$(('mem_' + schoolId + '_teacher_' + safeEmailKey(authEmail()))))
           )
         )
@@ -171,7 +270,7 @@ service cloud.firestore {
     // --- Validation Blueprints ---
     function isValidSchool(data) {
       return data.keys().hasAll(['ownerId', 'schoolName', 'adminName', 'academicYear', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['ownerId', 'schoolName', 'adminName', 'academicYear', 'endOfYearDate', 'motto', 'phone', 'email', 'address', 'city', 'registrationCode', 'memberEmails', 'staffEmails', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'schoolName', 'adminName', 'academicYear', 'endOfYearDate', 'motto', 'phone', 'email', 'address', 'city', 'registrationCode', 'theme', 'ownerEmail', 'censeurEmails', 'censeurNames', 'teacherEmails', 'memberEmails', 'staffEmails', 'createdAt', 'updatedAt'])
         && isValidId(data.ownerId)
         && data.schoolName is string && data.schoolName.size() >= 2 && data.schoolName.size() <= 120
         && data.adminName is string && data.adminName.size() >= 2 && data.adminName.size() <= 100
@@ -183,6 +282,11 @@ service cloud.firestore {
         && (!('address' in data) || (data.address is string && data.address.size() <= 160))
         && (!('city' in data) || (data.city is string && data.city.size() <= 80))
         && (!('registrationCode' in data) || (data.registrationCode is string && data.registrationCode.size() <= 60))
+        && (!('theme' in data) || data.theme in ['violet', 'bleu', 'blanc', 'rouge', 'verte', 'orange', 'marron', 'gris'])
+        && (!('ownerEmail' in data) || (data.ownerEmail is string && data.ownerEmail.size() <= 120))
+        && (!('censeurEmails' in data) || isValidEmailList(data.censeurEmails, 20))
+        && (!('censeurNames' in data) || isValidStringList(data.censeurNames, 20))
+        && (!('teacherEmails' in data) || isValidEmailList(data.teacherEmails, 100))
         && (!('memberEmails' in data) || isValidEmailList(data.memberEmails, 100))
         && (!('staffEmails' in data) || isValidEmailList(data.staffEmails, 100))
         && data.createdAt is timestamp
@@ -341,7 +445,7 @@ service cloud.firestore {
 
     function isValidNotification(data) {
       return data.keys().hasAll(['ownerId', 'schoolId', 'type', 'title', 'message', 'audienceEmails', 'createdByEmail', 'createdByName', 'read', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['ownerId', 'schoolId', 'type', 'title', 'message', 'targetClasse', 'studentId', 'audienceEmails', 'managementEmails', 'createdByEmail', 'createdByName', 'read', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'schoolId', 'type', 'title', 'message', 'targetClasse', 'studentId', 'audienceEmails', 'dismissedByEmails', 'managementEmails', 'createdByEmail', 'createdByName', 'createdByRole', 'read', 'expiresAt', 'createdAt', 'updatedAt'])
         && isValidId(data.ownerId)
         && isValidId(data.schoolId)
         && data.type in ['grade', 'absence', 'announcement']
@@ -350,10 +454,13 @@ service cloud.firestore {
         && (!('targetClasse' in data) || (data.targetClasse is string && data.targetClasse.size() <= 40))
         && (!('studentId' in data) || (data.studentId is string && data.studentId.size() <= 128))
         && isValidEmailList(data.audienceEmails, 100)
+        && (!('dismissedByEmails' in data) || isValidEmailList(data.dismissedByEmails, 100))
         && (!('managementEmails' in data) || isValidEmailList(data.managementEmails, 20))
         && data.createdByEmail is string && data.createdByEmail.size() >= 3 && data.createdByEmail.size() <= 120
         && data.createdByName is string && data.createdByName.size() >= 1 && data.createdByName.size() <= 100
+        && (!('createdByRole' in data) || data.createdByRole in ['admin', 'censeur', 'secretaire', 'teacher', 'parent'])
         && data.read is bool
+        && (!('expiresAt' in data) || data.expiresAt == null || data.expiresAt is timestamp)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -431,14 +538,14 @@ service cloud.firestore {
           isAdmin() ||
           (
             existing().ownerId == request.auth.uid &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['schoolName', 'adminName', 'academicYear', 'endOfYearDate', 'motto', 'phone', 'email', 'address', 'city', 'registrationCode', 'memberEmails', 'staffEmails', 'updatedAt'])
+            incoming().diff(existing()).affectedKeys().hasOnly(['schoolName', 'adminName', 'academicYear', 'endOfYearDate', 'motto', 'phone', 'email', 'address', 'city', 'registrationCode', 'theme', 'ownerEmail', 'censeurEmails', 'censeurNames', 'teacherEmails', 'memberEmails', 'staffEmails', 'updatedAt'])
           ) ||
           (
             isCenseurInSchool(schoolId) &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['memberEmails', 'staffEmails', 'updatedAt'])
+            incoming().diff(existing()).affectedKeys().hasOnly(['memberEmails', 'staffEmails', 'censeurEmails', 'censeurNames', 'teacherEmails', 'updatedAt'])
           )
         );
-      allow delete: if isVerifiedUser() && isValidId(schoolId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow delete: if isVerifiedUser() && isValidId(schoolId) && existing().ownerId == request.auth.uid;
     }
 
     match /classrooms/{classroomId} {
@@ -459,7 +566,7 @@ service cloud.firestore {
       allow create: if isVerifiedUser()
         && isValidId(classroomId)
         && isValidClassroom(incoming())
-        && canManageStudentsInSchool(incoming().schoolId, incoming().ownerId)
+        && canManageClassesInSchool(incoming().schoolId, incoming().ownerId)
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
       allow update: if isVerifiedUser()
@@ -473,17 +580,14 @@ service cloud.firestore {
         && (
           isAdmin() ||
           (
-            (existing().ownerId == request.auth.uid || isCenseurInSchool(existing().schoolId)) &&
+            (existing().ownerId == request.auth.uid || isCenseurInSchool(existing().schoolId) || isSecretaireInSchool(existing().schoolId)) &&
             incoming().diff(existing()).affectedKeys().hasOnly(['name', 'level', 'cycle', 'series', 'motif', 'accentColor', 'room', 'headTeacher', 'headTeacherEmail', 'slogan', 'closingDate', 'teacherEmails', 'memberEmails', 'managementEmails', 'updatedAt'])
-          ) ||
-          (
-            isSecretaireInSchool(existing().schoolId) &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['name', 'level', 'cycle', 'series', 'motif', 'accentColor', 'room', 'headTeacher', 'headTeacherEmail', 'slogan', 'closingDate', 'updatedAt'])
           )
         );
       allow delete: if isVerifiedUser() && isValidId(classroomId) && (
         existing().ownerId == request.auth.uid ||
-        isManagementInSchool(existing().schoolId) ||
+        isCenseurInSchool(existing().schoolId) ||
+        isSecretaireInSchool(existing().schoolId) ||
         isAdmin()
       );
     }
@@ -506,8 +610,8 @@ service cloud.firestore {
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
         && (
-          (incoming().role in ['censeur', 'secretaire'] && incoming().ownerId == request.auth.uid && ownsExistingSchool(incoming().schoolId)) ||
-          (incoming().role == 'teacher' && canManagePedagogyInSchool(incoming().schoolId, incoming().ownerId)) ||
+          (incoming().role == 'censeur' && incoming().ownerId == request.auth.uid && ownsExistingSchool(incoming().schoolId)) ||
+          (incoming().role in ['secretaire', 'teacher'] && canManagePedagogyInSchool(incoming().schoolId, incoming().ownerId)) ||
           (incoming().role == 'parent' && canManageStudentsInSchool(incoming().schoolId, incoming().ownerId))
         )
         && (
@@ -533,9 +637,15 @@ service cloud.firestore {
           ) ||
           (
             isCenseurInSchool(existing().schoolId) &&
-            existing().role in ['teacher', 'parent'] &&
-            incoming().role in ['teacher', 'parent'] &&
+            existing().role in ['secretaire', 'teacher', 'parent'] &&
+            incoming().role in ['secretaire', 'teacher', 'parent'] &&
             incoming().diff(existing()).affectedKeys().hasOnly(['memberEmail', 'memberName', 'role', 'assignedClasses', 'assignedSubject', 'childStudentIds', 'managementEmails', 'updatedAt'])
+          ) ||
+          (
+            isCenseurInSchool(existing().schoolId) &&
+            existing().role == 'censeur' &&
+            incoming().role == 'censeur' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['managementEmails', 'updatedAt'])
           ) ||
           (
             isSecretaireInSchool(existing().schoolId) &&
@@ -546,7 +656,7 @@ service cloud.firestore {
         );
       allow delete: if isVerifiedUser() && isValidId(membershipId) && (
         existing().ownerId == request.auth.uid ||
-        (isCenseurInSchool(existing().schoolId) && existing().role in ['teacher', 'parent']) ||
+        (isCenseurInSchool(existing().schoolId) && existing().role in ['secretaire', 'teacher', 'parent']) ||
         isAdmin()
       );
     }
@@ -568,7 +678,7 @@ service cloud.firestore {
       allow create: if isVerifiedUser()
         && isValidId(studentId)
         && isValidStudent(incoming())
-        && canManageStudentsInSchool(incoming().schoolId, incoming().ownerId)
+        && canManageEnrollmentsInSchool(incoming().schoolId, incoming().ownerId)
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
       allow update: if isVerifiedUser()
@@ -582,12 +692,12 @@ service cloud.firestore {
         && (
           isAdmin() ||
           (
-            (existing().ownerId == request.auth.uid || isCenseurInSchool(existing().schoolId)) &&
+            (existing().ownerId == request.auth.uid || isSecretaireInSchool(existing().schoolId)) &&
             incoming().diff(existing()).affectedKeys().hasOnly(['matricule', 'nom', 'prenoms', 'sexe', 'age', 'cycle', 'classe', 'guardianName', 'guardianPhone', 'parentEmail', 'studentEmail', 'teacherEmails', 'managementEmails', 'status', 'updatedAt'])
           ) ||
           (
-            isSecretaireInSchool(existing().schoolId) &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['matricule', 'nom', 'prenoms', 'sexe', 'age', 'cycle', 'classe', 'guardianName', 'guardianPhone', 'parentEmail', 'studentEmail', 'teacherEmails', 'status', 'updatedAt'])
+            isCenseurInSchool(existing().schoolId) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['classe', 'cycle', 'teacherEmails', 'parentEmail', 'managementEmails', 'updatedAt'])
           )
         );
       allow delete: if isVerifiedUser() && isValidId(studentId) && (
@@ -613,14 +723,14 @@ service cloud.firestore {
         && isValidStudentLock(incoming())
         && incoming().studentEmail == incoming().studentEmail.lower()
         && lockId == ('stulock_' + incoming().schoolId + '_' + safeEmailKey(incoming().studentEmail))
-        && canManageStudentsInSchool(incoming().schoolId, incoming().ownerId)
+        && canManageEnrollmentsInSchool(incoming().schoolId, incoming().ownerId)
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
       allow update: if isVerifiedUser()
         && isValidId(lockId)
         && isValidStudentLock(incoming())
         && incoming().studentEmail == incoming().studentEmail.lower()
-        && (existing().ownerId == request.auth.uid || isManagementInSchool(existing().schoolId) || isAdmin())
+        && (existing().ownerId == request.auth.uid || isSecretaireInSchool(existing().schoolId) || isAdmin())
         && incoming().ownerId == existing().ownerId
         && incoming().schoolId == existing().schoolId
         && incoming().createdAt == existing().createdAt
@@ -631,7 +741,7 @@ service cloud.firestore {
         );
       allow delete: if isVerifiedUser() && isValidId(lockId) && (
         existing().ownerId == request.auth.uid ||
-        isManagementInSchool(existing().schoolId) ||
+        isSecretaireInSchool(existing().schoolId) ||
         isAdmin()
       );
     }
@@ -724,6 +834,10 @@ service cloud.firestore {
             incoming().diff(existing()).affectedKeys().hasOnly(['classe', 'subjectName', 'coef', 'int1', 'int2', 'devoir', 'compo', 'appreciation', 'parentEmail', 'teacherEmails', 'managementEmails', 'updatedAt'])
           ) ||
           (
+            isSecretaireInSchool(existing().schoolId) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['classe', 'updatedAt'])
+          ) ||
+          (
             !isStudentLockedInSchool(existing().schoolId) &&
             ('teacherEmails' in existing() && authEmail() in existing().teacherEmails) &&
             incoming().diff(existing()).affectedKeys().hasOnly(['int1', 'int2', 'devoir', 'compo', 'appreciation', 'updatedAt'])
@@ -731,7 +845,7 @@ service cloud.firestore {
         );
       allow delete: if isVerifiedUser() && isValidId(gradeId) && (
         existing().ownerId == request.auth.uid ||
-        isCenseurInSchool(existing().schoolId) ||
+        isManagementInSchool(existing().schoolId) ||
         isAdmin()
       );
     }
@@ -792,7 +906,7 @@ service cloud.firestore {
         );
       allow delete: if isVerifiedUser() && isValidId(remarkId) && (
         existing().ownerId == request.auth.uid ||
-        isCenseurInSchool(existing().schoolId) ||
+        isManagementInSchool(existing().schoolId) ||
         isAdmin()
       );
     }
@@ -819,10 +933,30 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && canWriteInSchool(incoming().schoolId, incoming().ownerId)
         && (
-          incoming().senderRole == 'parent' ||
-          (incoming().senderRole == 'teacher' && canStaffWriteInSchool(incoming().schoolId, incoming().ownerId)) ||
+          (
+            incoming().senderRole == 'parent' &&
+            !isManagementInSchool(incoming().schoolId) &&
+            isRecipientCenseurInSchool(incoming().schoolId, incoming().recipientEmail)
+          ) ||
+          (
+            incoming().senderRole == 'teacher' &&
+            canStaffWriteInSchool(incoming().schoolId, incoming().ownerId) &&
+            !isManagementInSchool(incoming().schoolId) &&
+            (
+              isRecipientCenseurInSchool(incoming().schoolId, incoming().recipientEmail) ||
+              isRecipientDirectorInSchool(incoming().schoolId, incoming().recipientEmail)
+            )
+          ) ||
+          (
+            incoming().senderRole == 'secretaire' &&
+            isSecretaireInSchool(incoming().schoolId) &&
+            (
+              isRecipientCenseurInSchool(incoming().schoolId, incoming().recipientEmail) ||
+              isRecipientDirectorInSchool(incoming().schoolId, incoming().recipientEmail) ||
+              isRecipientTeacherInSchool(incoming().schoolId, incoming().recipientEmail)
+            )
+          ) ||
           (incoming().senderRole == 'censeur' && isCenseurInSchool(incoming().schoolId)) ||
-          (incoming().senderRole == 'secretaire' && isSecretaireInSchool(incoming().schoolId)) ||
           (incoming().senderRole == 'admin' && (incoming().ownerId == request.auth.uid || isAdmin()))
         );
       allow update: if isVerifiedUser()
@@ -837,24 +971,33 @@ service cloud.firestore {
         && incoming().schoolId == existing().schoolId
         && incoming().senderUid == existing().senderUid
         && incoming().senderEmail == existing().senderEmail
+        && incoming().senderRole == existing().senderRole
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && (
           isAdmin() ||
           incoming().diff(existing()).affectedKeys().hasOnly(['read', 'updatedAt'])
         );
-      allow delete: if isVerifiedUser() && isValidId(messageId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow delete: if isVerifiedUser() && isValidId(messageId) && (
+        existing().ownerId == request.auth.uid ||
+        existing().senderEmail == authEmail() ||
+        existing().recipientEmail == authEmail() ||
+        isCenseurInSchool(existing().schoolId) ||
+        isAdmin()
+      );
     }
 
     match /notifications/{notificationId} {
       allow get: if isVerifiedUser() && isValidId(notificationId) && (
         existing().ownerId == request.auth.uid ||
-        isManagementInSchool(existing().schoolId) ||
+        isCenseurInSchool(existing().schoolId) ||
+        existing().createdByEmail == authEmail() ||
         authEmail() in existing().audienceEmails ||
         isAdmin()
       );
       allow list: if isVerifiedUser() && (
         resource.data.ownerId == request.auth.uid ||
+        resource.data.createdByEmail == authEmail() ||
         ('managementEmails' in resource.data && authEmail() in resource.data.managementEmails) ||
         authEmail() in resource.data.audienceEmails
       );
@@ -862,33 +1005,63 @@ service cloud.firestore {
         && isValidId(notificationId)
         && isValidNotification(incoming())
         && incoming().createdByEmail == authEmail()
+        && 'createdByRole' in incoming()
+        && incoming().audienceEmails.size() >= 1
         && incoming().read == false
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
-        && canStaffWriteInSchool(incoming().schoolId, incoming().ownerId);
+        && schoolBelongsToOwner(incoming().schoolId, incoming().ownerId)
+        && (
+          (incoming().createdByRole == 'admin' && (incoming().ownerId == request.auth.uid || isAdmin())) ||
+          (incoming().createdByRole == 'censeur' && isCenseurInSchool(incoming().schoolId)) ||
+          (
+            incoming().createdByRole == 'secretaire' &&
+            isSecretaireInSchool(incoming().schoolId) &&
+            audienceOnlySecretaireTargets(incoming().schoolId, incoming().audienceEmails)
+          ) ||
+          (
+            incoming().createdByRole == 'teacher' &&
+            canStaffWriteInSchool(incoming().schoolId, incoming().ownerId) &&
+            !isManagementInSchool(incoming().schoolId) &&
+            audienceOnlyLeadershipTargets(incoming().schoolId, incoming().audienceEmails)
+          ) ||
+          (
+            incoming().createdByRole == 'parent' &&
+            canWriteInSchool(incoming().schoolId, incoming().ownerId) &&
+            !isManagementInSchool(incoming().schoolId) &&
+            audienceOnlyCenseurTargets(incoming().schoolId, incoming().audienceEmails)
+          )
+        );
       allow update: if isVerifiedUser()
         && isValidId(notificationId)
         && isValidNotification(incoming())
         && (
           existing().ownerId == request.auth.uid ||
           authEmail() in existing().audienceEmails ||
-          isManagementInSchool(existing().schoolId) ||
+          isCenseurInSchool(existing().schoolId) ||
           isAdmin()
         )
         && incoming().ownerId == existing().ownerId
         && incoming().schoolId == existing().schoolId
         && incoming().createdByEmail == existing().createdByEmail
+        && (!('createdByRole' in existing()) || ('createdByRole' in incoming() && incoming().createdByRole == existing().createdByRole))
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && (
           isAdmin() ||
           (
             existing().ownerId == request.auth.uid &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['read', 'managementEmails', 'updatedAt'])
+            incoming().diff(existing()).affectedKeys().hasOnly(['read', 'dismissedByEmails', 'managementEmails', 'updatedAt'])
           ) ||
-          incoming().diff(existing()).affectedKeys().hasOnly(['read', 'updatedAt'])
+          incoming().diff(existing()).affectedKeys().hasOnly(['read', 'dismissedByEmails', 'updatedAt'])
         );
-      allow delete: if isVerifiedUser() && isValidId(notificationId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow delete: if isVerifiedUser() && isValidId(notificationId) && (
+        existing().ownerId == request.auth.uid ||
+        existing().createdByEmail == authEmail() ||
+        isCenseurInSchool(existing().schoolId) ||
+        (authEmail() in existing().audienceEmails && existing().audienceEmails.size() <= 1) ||
+        isAdmin()
+      );
     }
 
     match /academicArchives/{archiveId} {
@@ -910,7 +1083,7 @@ service cloud.firestore {
       allow update: if isVerifiedUser()
         && isValidId(archiveId)
         && isValidAcademicArchive(incoming())
-        && (existing().ownerId == request.auth.uid || isAdmin())
+        && (existing().ownerId == request.auth.uid || isCenseurInSchool(existing().schoolId) || isAdmin())
         && incoming().ownerId == existing().ownerId
         && incoming().schoolId == existing().schoolId
         && incoming().academicYear == existing().academicYear

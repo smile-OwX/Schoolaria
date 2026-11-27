@@ -20,6 +20,8 @@ import {
   SchoolProfile,
   Student,
   Subject,
+  UserRole,
+  canNotifyParents,
   compareClassNames,
   formatRank,
   getCycleForClass,
@@ -54,6 +56,7 @@ interface BulletinViewProps {
   ownerUid: string;
   actorEmail: string;
   actorName: string;
+  actorRole?: UserRole;
   readOnly?: boolean;
   allowBatchPrint?: boolean;
   school: SchoolProfile;
@@ -70,6 +73,7 @@ export function BulletinView({
   ownerUid,
   actorEmail,
   actorName,
+  actorRole = 'censeur',
   readOnly = false,
   allowBatchPrint,
   school,
@@ -240,7 +244,7 @@ export function BulletinView({
         parentEmail: student.parentEmail,
         teacherEmails: student.teacherEmails,
       });
-      if (safeAbsences > prevAbsences && student.parentEmail) {
+      if (safeAbsences > prevAbsences && student.parentEmail && canNotifyParents(actorRole)) {
         const periodTxt = getPeriodLabel(student.cycle, effectiveTrimester);
         await createNotification(ownerUid, school.id, {
           type: 'absence',
@@ -251,6 +255,7 @@ export function BulletinView({
           audienceEmails: [student.parentEmail],
           createdByEmail: actorEmail,
           createdByName: actorName,
+          createdByRole: actorRole,
         });
       }
       setSavedNotice('Appréciations du bulletin enregistrées.');

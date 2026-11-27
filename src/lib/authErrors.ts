@@ -1,7 +1,8 @@
 export function formatFirebaseAuthErrorDetails(
   code: string,
   msg: string,
-  origin = ''
+  origin = '',
+  context: 'email' | 'phone' = 'email'
 ): string {
   if (/cancel/i.test(code) || /cancel/i.test(msg) || code === '12501' || code === '16') {
     return 'Connexion annulée avant validation. Réessayez.';
@@ -22,17 +23,25 @@ export function formatFirebaseAuthErrorDetails(
     case 'auth/operation-not-supported-in-this-environment':
       return 'Cet environnement bloque les fenêtres popup : bascule en mode redirection en cours...';
     case 'auth/operation-not-allowed':
-      return 'La connexion par E-mail et Mot de passe n’est pas encore activée dans Firebase Console → Authentication → Sign-in method.';
+      return context === 'phone'
+        ? 'La connexion par numéro et mot de passe n’est pas encore activée dans Firebase Console → Authentication → Sign-in method (E-mail/Mot de passe).'
+        : 'La connexion par E-mail et Mot de passe n’est pas encore activée dans Firebase Console → Authentication → Sign-in method.';
     case 'auth/email-already-in-use':
-      return 'Un compte existe déjà avec cet e-mail. Cliquez sur « Déjà inscrit · Se connecter » ou sur « Mot de passe oublié ? » pour définir un nouveau mot de passe.';
+      return context === 'phone'
+        ? 'Ce numéro de téléphone est déjà inscrit. Passez sur « Se connecter » ou utilisez Google.'
+        : 'Un compte existe déjà avec cet e-mail. Cliquez sur « Déjà inscrit · Se connecter » ou sur « Mot de passe oublié ? » pour définir un nouveau mot de passe.';
     case 'auth/invalid-email':
-      return 'Adresse e-mail invalide. Vérifiez le format saisi (ex : nom@yahoo.fr, nom@outlook.com).';
+      return context === 'phone'
+        ? 'Numéro de téléphone invalide. Saisissez un numéro valide (ex : 90 12 34 56 ou +228 90 12 34 56).'
+        : 'Adresse e-mail invalide. Vérifiez le format saisi (ex : nom@yahoo.fr, nom@outlook.com).';
     case 'auth/weak-password':
       return 'Mot de passe trop faible : utilisez au moins 6 caractères.';
     case 'auth/user-not-found':
     case 'auth/wrong-password':
     case 'auth/invalid-credential':
-      return 'E-mail ou mot de passe incorrect. Si c’est votre 1ère connexion (l’école a ajouté votre e-mail sans mot de passe), cliquez sur « 1ère connexion · Créer mon mot de passe ».';
+      return context === 'phone'
+        ? 'Numéro de téléphone ou mot de passe incorrect. Si vous n’avez pas encore de compte, cliquez sur « S’inscrire ».'
+        : 'E-mail ou mot de passe incorrect. Si c’est votre 1ère connexion (l’école a ajouté votre e-mail sans mot de passe), cliquez sur « 1ère connexion · Créer mon mot de passe ».';
     case 'auth/too-many-requests':
       return 'Trop de tentatives en peu de temps. Patientez quelques minutes avant de réessayer.';
     case 'auth/credential-already-in-use':

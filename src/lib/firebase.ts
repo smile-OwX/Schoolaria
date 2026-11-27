@@ -35,6 +35,7 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { formatFirebaseAuthErrorDetails } from './authErrors.ts';
+import { phoneToAuthEmail, resolveIdentifierToAuthEmail } from './phoneAuth.ts';
 
 const app = initializeApp(firebaseConfig);
 
@@ -136,12 +137,15 @@ export async function processAuthRedirectResult(): Promise<UserCredential | null
   }
 }
 
-export function formatFirebaseAuthError(error: unknown): string {
+export function formatFirebaseAuthError(
+  error: unknown,
+  context: 'email' | 'phone' = 'email'
+): string {
   const errObj = error as { code?: string; message?: string } | null;
   const code = String(errObj?.code || '');
   const msg = String(errObj?.message || '');
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  return formatFirebaseAuthErrorDetails(code, msg, origin);
+  return formatFirebaseAuthErrorDetails(code, msg, origin, context);
 }
 
 /**
@@ -373,7 +377,50 @@ export async function signInWithEmailPassword(
     const cred = await signInWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
     return cred.user;
   } catch (err: unknown) {
-    throw new Error(formatFirebaseAuthError(err));
+    throw new Error(formatFirebaseAuthError(err, 'email'));
+  }
+}
+
+export async function registerWithPhonePassword(
+  fullName: string,
+  phone: string,
+  password: string,
+  countryCode = '228'
+): Promise<User> {
+  const cleanName = fullName.trim();
+  const authEmail = phoneToAuthEmail(phone, countryCode);
+  if (!authEmail) {
+    throw new Error('Numéro de téléphone invalide. Saisissez un numéro valide (ex : 90 12 34 56).');
+  }
+  try {
+    const cred = await createUserWithEmailAndPassword(auth, authEmail, password);
+    if (cleanName) {
+      await updateProfile(cred.user, { displayName: cleanName }).catch(() => {});
+    }
+    return cred.user;
+  } catch (err: unknown) {
+    throw new Error(formatFirebaseAuthError(err, 'phone'));
+  }
+}
+
+export async function signInWithPhoneOrEmailPassword(
+  identifier: string,
+  password: string,
+  countryCode = '228'
+): Promise<{ user: User; isPhone: boolean }> {
+  const resolved = resolveIdentifierToAuthEmail(identifier, countryCode);
+  if (!resolved.authEmail) {
+    throw new Error(
+      resolved.isPhone
+        ? 'Numéro de téléphone invalide. Saisissez un numéro valide (ex : 90 12 34 56).'
+        : 'Veuillez saisir un numéro de téléphone ou une adresse e-mail valide.'
+    );
+  }
+  try {
+    const cred = await signInWithEmailAndPassword(auth, resolved.authEmail, password);
+    return { user: cred.user, isPhone: resolved.isPhone };
+  } catch (err: unknown) {
+    throw new Error(formatFirebaseAuthError(err, resolved.isPhone ? 'phone' : 'email'));
   }
 }
 

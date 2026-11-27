@@ -28,6 +28,7 @@ import {
   AlertTriangle,
   Megaphone,
   RefreshCw,
+  Trash2,
 } from 'lucide-react';
 import {
   auth,
@@ -37,7 +38,13 @@ import {
   testFirestoreConnection,
 } from './lib/firebase.ts';
 import {
+  formatAuthIdentifierForDisplay,
+  isUserAccountVerified,
+} from './lib/phoneAuth.ts';
+import {
+  cleanupNotificationsBulk,
   deleteSchoolCascade,
+  dismissOrDeleteNotification,
   initializeDefaultClassrooms,
   markAllNotificationsRead,
   markNotificationRead,
@@ -49,7 +56,24 @@ import {
   subscribeWorkspaceDiscovery,
   syncAccessPropagation,
   syncTogoCurriculum,
+  updateSchoolTheme,
 } from './lib/schoolService.ts';
+import {
+  SchoolUniformTheme,
+  applySchoolThemeToDocument,
+  getSavedPreviewTheme,
+  normalizeSchoolTheme,
+  savePreviewTheme,
+} from './lib/schoolTheme.ts';
+import {
+  canAccessTab,
+  canBatchPrintBulletinsForRole,
+  canChangeSchoolThemeForRole,
+  canEditBulletinsForRole,
+  canManageLeadershipForRole,
+  canManageSecretaireForRole,
+  canManageYearLifecycleForRole,
+} from './lib/rolePermissions.ts';
 import { filterChildrenForParent } from './lib/parentHelpers.ts';
 import {
   ALL_CLASSES,
@@ -74,7 +98,7 @@ import {
   canManageStudents,
   canManageSubjects,
   getClassroomTheme,
-  isSchoolWideStaffRole,
+  isNotificationVisibleForUser,
   isTeacherTitulaire,
   normalizeSubjectKey,
   sortClassrooms,
@@ -87,6 +111,7 @@ import {
   SchoolSetupForm,
 } from './components/OnboardingSetup.tsx';
 import { FloatingAcademicBackdrop } from './components/FloatingAcademicBackdrop.tsx';
+import { UniformThemePicker } from './components/UniformThemePicker.tsx';
 import {
   ActiveTab,
   PersonalizedDashboard,
@@ -119,7 +144,12 @@ import {
 
 function AppShell() {
   useGlobalMaterialRipple();
-  const [showSplash, setShowSplash] = useState(true);
+  const [showSplash, setShowSplash] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return new URLSearchParams(window.location.search).get('autostart') !== '1';
+    }
+    return true;
+  });
   const [authReady, setAuthReady] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [verifiedVersion, setVerifiedVersion] = useState(0);
@@ -129,7 +159,7 @@ function AppShell() {
   const [activeWorkspaceKey, setActiveWorkspaceKey] = useState<string | null>(null);
   const [creatingOwnSchool, setCreatingOwnSchool] = useState(false);
 
-  const [previewRole, setPreviewRole] = useState<UserRole | null>(null);
+  const [savingTheme, setSavingTheme] = useState(false);
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -154,9 +184,15 @@ function AppShell() {
   const [notifPanelOpen, setNotifPanelOpen] = useState(false);
   const [yearModalOpen, setYearModalOpen] = useState(false);
   const [yearSuccessBanner, setYearSuccessBanner] = useState<string | null>(null);
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
   const didInitClassrooms = useRef(false);
   const didSyncStaff = useRef(false);
   const didSyncTogo = useRef(false);
+
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     void processAuthRedirectResult();
@@ -183,7 +219,7 @@ function AppShell() {
         setNotifications([]);
         setAuditLogs([]);
         setArchives([]);
-        setPreviewRole(null);
+        applySchoolThemeToDocument(getSavedPreviewTheme());
       } else {
         try {
           const savedKey = localStorage.getItem(`schoolaria_ws_${currentUser.uid}`);
@@ -196,9 +232,10 @@ function AppShell() {
     return () => unsubAuth();
   }, []);
 
-  // Step 1: Discover all establishments & roles ONLY when email is verified
+  // Step 1: Discover all establishments & roles ONLY when account is verified (Google, verified email, or phone account)
+  const accountVerified = isUserAccountVerified(user);
   useEffect(() => {
-    if (!user || !user.emailVerified) return;
+    if (!user || !accountVerified) return;
     setDbError(null);
     setDiscoveryLoading(true);
     const unsubs = subscribeWorkspaceDiscovery(user.uid, user.email || '', {
@@ -212,7 +249,7 @@ function AppShell() {
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [user, user?.emailVerified, verifiedVersion]);
+  }, [user, accountVerified, verifiedVersion]);
 
   const activeWorkspace = useMemo(() => {
     if (workspaces.length === 0) return null;
@@ -227,7 +264,23 @@ function AppShell() {
     ? undefined
     : activeWorkspace?.school ?? null;
   const actualRole: UserRole = activeWorkspace?.role ?? 'admin';
+  const effectiveRole: UserRole = actualRole;
   const activeMembership: Membership | null = activeWorkspace?.membership ?? null;
+
+  const activeSchoolTheme: SchoolUniformTheme = school
+    ? normalizeSchoolTheme(school.theme)
+    : getSavedPreviewTheme();
+
+  useEffect(() => {
+    applySchoolThemeToDocument(activeSchoolTheme);
+  }, [activeSchoolTheme]);
+
+  // Ensure activeTab never points to a panel forbidden for the user's strict role
+  useEffect(() => {
+    if (!canAccessTab(effectiveRole, activeTab)) {
+      setActiveTab('hub');
+    }
+  }, [effectiveRole, activeTab]);
 
   const handleSelectWorkspace = (wsKey: string) => {
     setActiveWorkspaceKey(wsKey);
@@ -238,14 +291,27 @@ function AppShell() {
         // Ignore storage error
       }
     }
-    setPreviewRole(null);
     setActiveTab('hub');
     setMobileMenuOpen(false);
   };
 
+  const handleQuickThemeChange = async (nextTheme: SchoolUniformTheme) => {
+    savePreviewTheme(nextTheme);
+    applySchoolThemeToDocument(nextTheme);
+    if (!school || !canChangeSchoolThemeForRole(effectiveRole)) return;
+    setSavingTheme(true);
+    try {
+      await updateSchoolTheme(school.id, nextTheme);
+    } catch (err: unknown) {
+      setDbError(err instanceof Error ? err.message : 'Erreur lors du changement de thème.');
+    } finally {
+      setSavingTheme(false);
+    }
+  };
+
   // Step 2: Subscribe strictly to the active workspace's resources (blocked if studentLocked or unverified)
   useEffect(() => {
-    if (!user || !user.emailVerified || !activeWorkspace) return;
+    if (!user || !accountVerified || !activeWorkspace) return;
     didInitClassrooms.current = false;
     didSyncStaff.current = false;
     didSyncTogo.current = false;
@@ -288,18 +354,37 @@ function AppShell() {
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [user, user?.emailVerified, verifiedVersion, activeWorkspace?.key, activeWorkspace?.studentLocked]);
+  }, [user, accountVerified, verifiedVersion, activeWorkspace?.key, activeWorkspace?.studentLocked]);
 
   useEffect(() => {
+    if (!school || !classroomsLoaded) return;
+    const initKey = `schoolaria_cls_init_${school.id}`;
+    if (classrooms.length > 0) {
+      try {
+        localStorage.setItem(initKey, '1');
+      } catch {
+        // Ignore storage error
+      }
+      return;
+    }
+    let alreadyInitialized = false;
+    try {
+      alreadyInitialized = localStorage.getItem(initKey) === '1';
+    } catch {
+      alreadyInitialized = false;
+    }
     if (
       user &&
       actualRole === 'admin' &&
-      school &&
-      classroomsLoaded &&
-      classrooms.length === 0 &&
+      !alreadyInitialized &&
       !didInitClassrooms.current
     ) {
       didInitClassrooms.current = true;
+      try {
+        localStorage.setItem(initKey, '1');
+      } catch {
+        // Ignore storage error
+      }
       initializeDefaultClassrooms(user.uid, school.id, school.memberEmails ?? []).catch(() => {
         // Ignore if already initialized concurrently
       });
@@ -311,7 +396,10 @@ function AppShell() {
       user &&
       actualRole === 'admin' &&
       school &&
-      school.staffEmails === undefined &&
+      (school.staffEmails === undefined ||
+        school.ownerEmail === undefined ||
+        school.censeurEmails === undefined ||
+        school.teacherEmails === undefined) &&
       !didSyncStaff.current
     ) {
       didSyncStaff.current = true;
@@ -352,9 +440,6 @@ function AppShell() {
           (s.cycle === 'Collège' && normalizeSubjectKey(s.name) === 'physique' && s.name !== 'PCT') ||
           (s.cycle === 'Lycée' && normalizeSubjectKey(s.name) === 'anglais' && s.name !== 'Anglais (LV1)')
       );
-    const missingClass = ALL_CLASSES.some(
-      (cl) => !classrooms.some((c) => c.name === cl.name)
-    );
     const officialNames = new Set(ALL_CLASSES.map((c) => c.name));
     const seenClassNames = new Set<string>();
     let hasDuplicateOrObsoleteClass = false;
@@ -369,7 +454,7 @@ function AppShell() {
       seenClassNames.add(c.name);
     }
 
-    if (missingSubject || missingClass || hasDuplicateOrObsoleteClass) {
+    if (missingSubject || hasDuplicateOrObsoleteClass) {
       didSyncTogo.current = true;
       syncTogoCurriculum(
         user.uid,
@@ -385,9 +470,6 @@ function AppShell() {
       didSyncTogo.current = true;
     }
   }, [user, actualRole, school, classroomsLoaded, subjects, classrooms, students]);
-
-  const isPreview = actualRole === 'admin' && previewRole !== null;
-  const effectiveRole: UserRole = isPreview && previewRole ? previewRole : actualRole;
 
   const ownerUid = school?.ownerId ?? user?.uid ?? '';
   const actorEmail = user?.email || school?.email || 'direction@ecole.com';
@@ -433,16 +515,12 @@ function AppShell() {
     if (effectiveRole === 'teacher') {
       const teacherMem = activeMembership ?? memberships.find((m) => m.role === 'teacher');
       const assigned = teacherMem?.assignedClasses ?? [];
-      const matching = uiClassrooms.filter(
+      return uiClassrooms.filter(
         (c) => assigned.includes(c.name) || isTeacherTitulaire(c, teacherMem)
       );
-      if (matching.length > 0) {
-        return matching;
-      }
-      return isPreview ? uiClassrooms.slice(0, 4) : [];
     }
     return uiClassrooms;
-  }, [effectiveRole, isPreview, activeMembership, memberships, uiClassrooms]);
+  }, [effectiveRole, activeMembership, memberships, uiClassrooms]);
 
   const scopedStudents = useMemo(() => {
     if (effectiveRole === 'parent') {
@@ -451,7 +529,7 @@ function AppShell() {
         activeMembership,
         memberships,
         parentEmail: user?.email,
-        isPreview,
+        isPreview: false,
       });
     }
     if (effectiveRole === 'teacher') {
@@ -459,7 +537,7 @@ function AppShell() {
       return uiStudents.filter((s) => assigned.includes(s.classe));
     }
     return uiStudents;
-  }, [effectiveRole, isPreview, activeMembership, memberships, user?.email, uiStudents, scopedClassrooms]);
+  }, [effectiveRole, activeMembership, memberships, user?.email, uiStudents, scopedClassrooms]);
 
   const activeMotif: ClassroomMotif = useMemo(() => {
     if (activeTab === 'classdetail') {
@@ -470,7 +548,7 @@ function AppShell() {
   }, [activeTab, classrooms, selectedClass]);
 
   const endOfYearAlert = useMemo(() => {
-    if (actualRole !== 'admin' || isPreview || !school?.endOfYearDate) return null;
+    if (!canManageYearLifecycleForRole(effectiveRole) || !school?.endOfYearDate) return null;
     const target = new Date(`${school.endOfYearDate}T23:59:59`);
     if (Number.isNaN(target.getTime())) return null;
     const diffDays = Math.ceil((target.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
@@ -478,9 +556,20 @@ function AppShell() {
       return { diffDays, dateStr: school.endOfYearDate };
     }
     return null;
-  }, [actualRole, isPreview, school?.endOfYearDate]);
+  }, [effectiveRole, school?.endOfYearDate]);
+
+  const cleanActorEmail = actorEmail.trim().toLowerCase();
+  const visibleNotifications = useMemo(
+    () => notifications.filter((n) => isNotificationVisibleForUser(n, actorEmail, nowTick)),
+    [notifications, actorEmail, nowTick]
+  );
 
   const handleNavigate = (tab: ActiveTab) => {
+    if (!canAccessTab(effectiveRole, tab)) {
+      setActiveTab('hub');
+      setMobileMenuOpen(false);
+      return;
+    }
     setNavDirection(computeNavDirection(activeTab, tab));
     setActiveTab(tab);
     setMobileMenuOpen(false);
@@ -544,12 +633,12 @@ function AppShell() {
     );
   }
 
-  if (!user || !user.emailVerified) {
+  if (!user || !accountVerified) {
     return (
       <div className="relative min-h-screen">
         <FloatingAcademicBackdrop />
         <AuthGate
-          pendingVerificationUser={user && !user.emailVerified ? user : null}
+          pendingVerificationUser={user && !accountVerified ? user : null}
           onVerificationComplete={(verifiedUser) => {
             setUser(verifiedUser);
             setVerifiedVersion((v) => v + 1);
@@ -588,7 +677,6 @@ function AppShell() {
               // Ignore storage error
             }
             setCreatingOwnSchool(false);
-            setPreviewRole(null);
             setActiveTab('hub');
           }}
         />
@@ -600,23 +688,26 @@ function AppShell() {
     return (
       <div className="min-h-screen flex items-center justify-center p-4 sm:p-6 relative">
         <FloatingAcademicBackdrop />
-        <div className="relative z-10 max-w-lg w-full bg-white/95 backdrop-blur-xs border border-violet-300/80 rounded-2xl overflow-hidden shadow-xl">
-          <div className="bg-gradient-to-r from-violet-950 via-violet-800 to-indigo-900 text-white p-6 flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-white text-violet-900 flex items-center justify-center shrink-0">
+        <div className="relative z-10 max-w-lg w-full bg-white/95 backdrop-blur-xs border theme-border-soft rounded-2xl overflow-hidden shadow-xl">
+          <div className="theme-surface-header p-6 flex items-center gap-3 border-b">
+            <div className="w-11 h-11 rounded-xl theme-nav-active flex items-center justify-center shrink-0">
               <GraduationCap className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-lg font-extrabold text-white">Aucun établissement rattaché</h1>
-              <p className="text-xs text-violet-200 break-all">{user.email}</p>
+              <h1 className="text-lg font-extrabold">Aucun établissement rattaché</h1>
+              <p className="text-xs theme-header-subtext break-all">
+                {user.displayName ? `${user.displayName} · ` : ''}
+                {formatAuthIdentifierForDisplay(user.email)}
+              </p>
             </div>
           </div>
 
           <div className="p-6 sm:p-7 space-y-4">
-            <div className="p-4 rounded-xl bg-violet-50 border border-violet-200 text-xs sm:text-sm text-violet-950 leading-relaxed space-y-2">
+            <div className="p-4 rounded-xl theme-pill-soft border text-xs sm:text-sm leading-relaxed space-y-2">
               <p className="font-bold">Vous êtes parent d’élève ou membre du personnel ?</p>
               <p className="text-zinc-700 text-xs leading-relaxed">
-                Demandez au secrétariat de votre établissement d’enregistrer exactement cette adresse e-mail (
-                <strong className="text-violet-900">{user.email}</strong>) sur la fiche de votre enfant ou dans{' '}
+                Demandez au secrétariat de votre établissement d’enregistrer exactement cet identifiant (
+                <strong className="theme-text-ink">{formatAuthIdentifierForDisplay(user.email)}</strong>) sur la fiche de votre enfant ou dans{' '}
                 <em>Rôles & Direction</em>, puis cliquez sur <strong>Actualiser mon accès</strong>.
               </p>
             </div>
@@ -625,7 +716,7 @@ function AppShell() {
               <button
                 type="button"
                 onClick={() => setVerifiedVersion((v) => v + 1)}
-                className="flex-1 min-w-[160px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-xs font-bold transition-colors"
+                className="flex-1 min-w-[160px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl theme-btn-primary text-xs font-bold transition-colors"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
                 Actualiser mon accès
@@ -640,14 +731,14 @@ function AppShell() {
               </button>
             </div>
 
-            <div className="pt-4 border-t border-violet-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="pt-4 border-t theme-border-soft flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <span className="text-xs text-zinc-600">
                 Vous êtes Directeur et créez une nouvelle école ?
               </span>
               <button
                 type="button"
                 onClick={() => setCreatingOwnSchool(true)}
-                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-violet-100 hover:bg-violet-200 text-violet-900 text-xs font-bold transition-colors shrink-0"
+                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl theme-pill-soft border text-xs font-bold transition-colors shrink-0"
               >
                 <PlusCircle className="w-3.5 h-3.5" />
                 Créer mon établissement scolaire
@@ -689,7 +780,7 @@ function AppShell() {
             </div>
           </div>
           <p className="text-sm text-zinc-600 leading-relaxed">
-            Votre adresse e-mail (<strong>{user.email}</strong>) figure dans le registre des élèves de{' '}
+            Votre identifiant (<strong>{formatAuthIdentifierForDisplay(user.email)}</strong>) figure dans le registre des élèves de{' '}
             <strong>{school.schoolName}</strong>. Par sécurité académique, un compte élève ne peut jamais accéder à l’espace Enseignant de son propre établissement.
           </p>
           <p className="text-xs text-zinc-500">
@@ -701,7 +792,7 @@ function AppShell() {
                 key={alt.key}
                 type="button"
                 onClick={() => handleSelectWorkspace(alt.key)}
-                className="px-4 py-2 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-xs font-semibold"
+                className="px-4 py-2 rounded-xl theme-btn-primary text-xs font-semibold"
               >
                 Ouvrir {alt.school.schoolName} ({alt.role})
               </button>
@@ -709,7 +800,7 @@ function AppShell() {
             <button
               type="button"
               onClick={() => setCreatingOwnSchool(true)}
-              className="px-4 py-2 rounded-xl bg-violet-100 hover:bg-violet-200 text-violet-900 text-xs font-semibold"
+              className="px-4 py-2 rounded-xl theme-pill-soft border text-xs font-semibold"
             >
               + Créer mon établissement
             </button>
@@ -726,97 +817,98 @@ function AppShell() {
     );
   }
 
-  const cleanActorEmail = actorEmail.trim().toLowerCase();
   const unreadMessagesCount = messages.filter(
     (m) => !m.read && m.senderEmail.trim().toLowerCase() !== cleanActorEmail
   ).length;
-  const unreadNotifsCount = notifications.filter((n) => !n.read).length;
+  const unreadNotifsCount = visibleNotifications.filter((n) => !n.read).length;
 
   const allNavItems: Array<{
     id: ActiveTab;
     label: string;
     icon: typeof LayoutGrid;
-    roles: UserRole[];
     badge?: number;
   }> = [
-    { id: 'hub', label: 'Tableau de bord', icon: LayoutGrid, roles: ['admin', 'censeur', 'secretaire', 'teacher', 'parent'] },
-    { id: 'inscription', label: 'Inscription', icon: UserPlus, roles: ['admin', 'censeur', 'secretaire'] },
+    { id: 'hub', label: 'Tableau de bord', icon: LayoutGrid },
+    { id: 'inscription', label: 'Inscription', icon: UserPlus },
     {
       id: 'makelist',
       label:
         effectiveRole === 'teacher'
           ? 'Mes Classes & Notes'
+          : effectiveRole === 'admin'
+          ? 'Classes & Divisions'
           : effectiveRole === 'secretaire'
           ? 'Classes & Listes'
           : 'Classes & Notes',
       icon: ClipboardList,
-      roles: ['admin', 'censeur', 'secretaire', 'teacher'],
     },
-    { id: 'bulletins', label: 'Bulletins & Suivi', icon: FileSpreadsheet, roles: ['admin', 'censeur', 'secretaire', 'teacher', 'parent'] },
-    { id: 'stats', label: 'Statistiques', icon: BarChart3, roles: ['admin', 'censeur', 'secretaire'] },
+    { id: 'bulletins', label: 'Bulletins & Suivi', icon: FileSpreadsheet },
+    { id: 'stats', label: 'Statistiques', icon: BarChart3 },
     {
       id: 'messages',
       label: 'Messagerie',
       icon: MessageSquare,
-      roles: ['admin', 'censeur', 'secretaire', 'teacher', 'parent'],
       badge: unreadMessagesCount,
     },
     {
       id: 'notifications',
       label: 'Notifications',
       icon: Bell,
-      roles: ['admin', 'censeur', 'secretaire', 'teacher', 'parent'],
       badge: unreadNotifsCount,
     },
     {
       id: 'roles',
-      label: effectiveRole === 'admin' ? 'Rôles & Direction' : 'Profs & Parents',
+      label:
+        effectiveRole === 'admin'
+          ? 'Rôles & Direction'
+          : effectiveRole === 'censeur'
+          ? 'Secrétaire, Profs & Parents'
+          : 'Profs & Parents',
       icon: Shield,
-      roles: ['admin', 'censeur'],
     },
-    { id: 'archives', label: 'Archives', icon: Archive, roles: ['admin', 'censeur', 'secretaire'] },
-    { id: 'audit', label: 'Journaux & Sécurité', icon: ShieldCheck, roles: ['admin'] },
-    { id: 'assistant', label: 'Yasmine (IA)', icon: Bot, roles: ['admin', 'censeur', 'teacher'] },
-    { id: 'settings', label: 'Établissement', icon: Settings, roles: ['admin'] },
+    { id: 'archives', label: 'Archives', icon: Archive },
+    { id: 'audit', label: 'Journaux & Sécurité', icon: ShieldCheck },
+    { id: 'assistant', label: 'Yasmine (IA)', icon: Bot },
+    { id: 'settings', label: 'Établissement', icon: Settings },
   ];
 
-  const visibleNavItems = allNavItems.filter((item) => item.roles.includes(effectiveRole));
+  const visibleNavItems = allNavItems.filter((item) => canAccessTab(effectiveRole, item.id));
   const currentRouteKey =
     effectiveRole + '_' + activeTab + (activeTab === 'classdetail' ? selectedClass : '');
 
   const renderSidebarBody = (scope: 'desktop' | 'mobile') => (
     <>
       <div className="space-y-1">
-        <div className="px-3.5 py-3 mb-3 rounded-2xl bg-white/10 border border-white/20 space-y-2">
+        <div className="px-3.5 py-3 mb-3 rounded-2xl theme-header-chip border space-y-2">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <p className="text-xs font-extrabold text-white truncate">{school.schoolName}</p>
-              <p className="text-[11px] text-violet-200 truncate">
+              <p className="text-xs font-extrabold truncate">{school.schoolName}</p>
+              <p className="text-[11px] theme-header-subtext truncate">
                 {school.adminName} · {school.academicYear}
               </p>
             </div>
-            <span className="px-2 py-0.5 rounded-md bg-white/15 text-[10px] font-bold text-white uppercase shrink-0">
+            <span className="px-2 py-0.5 rounded-md theme-nav-active text-[10px] font-bold uppercase shrink-0">
               {ROLE_SHORT_LABELS[actualRole]}
             </span>
           </div>
 
           {school.city && (
-            <p className="text-[10px] text-violet-300 truncate">
+            <p className="text-[10px] theme-header-subtext truncate">
               {school.city}
               {school.registrationCode ? ` · ${school.registrationCode}` : ''}
             </p>
           )}
 
           {workspaces.length > 1 && (
-            <div className="pt-1.5 border-t border-white/15">
-              <label className="text-[10px] font-semibold text-violet-200 flex items-center gap-1 mb-1">
+            <div className="pt-1.5 border-t border-current/15">
+              <label className="text-[10px] font-semibold theme-header-subtext flex items-center gap-1 mb-1">
                 <Building2 className="w-3 h-3 shrink-0" />
                 Changer d'établissement / rôle
               </label>
               <select
                 value={activeWorkspace?.key ?? ''}
                 onChange={(e) => handleSelectWorkspace(e.target.value)}
-                className="w-full px-2.5 py-1.5 rounded-xl bg-violet-950/90 border border-white/25 text-white text-[11px] font-semibold outline-none focus:border-white"
+                className="w-full px-2.5 py-1.5 rounded-xl bg-white border border-zinc-300 text-zinc-900 text-[11px] font-semibold outline-none theme-input"
               >
                 {workspaces.map((ws) => {
                   const roleTag = ws.studentLocked
@@ -832,63 +924,32 @@ function AppShell() {
             </div>
           )}
 
+          {canChangeSchoolThemeForRole(effectiveRole) && (
+            <div className="pt-1.5 border-t border-current/15">
+              <p className="text-[10px] font-semibold theme-header-subtext mb-1.5">
+                Uniforme de l’école
+              </p>
+              <UniformThemePicker
+                variant="header"
+                value={activeSchoolTheme}
+                disabled={savingTheme}
+                onChange={(nextTheme) => void handleQuickThemeChange(nextTheme)}
+              />
+            </div>
+          )}
+
           <button
             type="button"
             onClick={() => {
               setMobileMenuOpen(false);
               setCreatingOwnSchool(true);
             }}
-            className="w-full mt-1 inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 border border-white/20 text-[11px] font-semibold text-white transition-colors"
+            className="w-full mt-1 inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl theme-header-chip border text-[11px] font-semibold transition-colors"
           >
             <PlusCircle className="w-3.5 h-3.5 shrink-0" />
             <span>Créer mon établissement</span>
           </button>
         </div>
-
-        {/* Admin Role Preview Switcher with Google Material gliding pill (5 roles) */}
-        {actualRole === 'admin' && (
-          <div className="mb-3 p-2 rounded-2xl bg-violet-900/75 border border-violet-700/70">
-            <p className="text-[10px] font-bold text-violet-200 uppercase tracking-wider px-1 mb-1.5">
-              Vue du tableau de bord
-            </p>
-            <div className="grid grid-cols-5 gap-1">
-              {(
-                [
-                  { id: 'admin', label: 'Dir.' },
-                  { id: 'censeur', label: 'Cens.' },
-                  { id: 'secretaire', label: 'Secr.' },
-                  { id: 'teacher', label: 'Prof' },
-                  { id: 'parent', label: 'Par.' },
-                ] as const
-              ).map((r) => {
-                const isSelected = effectiveRole === r.id;
-                return (
-                  <button
-                    key={r.id}
-                    type="button"
-                    onClick={() => {
-                      setNavDirection('backward');
-                      setPreviewRole(r.id === 'admin' ? null : r.id);
-                      setActiveTab('hub');
-                    }}
-                    className={`relative py-1.5 rounded-xl text-[10px] font-bold transition-colors ${
-                      isSelected ? 'text-violet-950' : 'text-violet-200 hover:text-white'
-                    }`}
-                  >
-                    {isSelected && (
-                      <motion.span
-                        layoutId={`role-switch-pill-${scope}`}
-                        transition={{ type: 'spring', stiffness: 500, damping: 34 }}
-                        className="absolute inset-0 rounded-xl bg-white shadow-xs"
-                      />
-                    )}
-                    <span className="relative z-10">{r.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
 
         {visibleNavItems.map((item, idx) => {
           const Icon = item.icon;
@@ -906,15 +967,15 @@ function AppShell() {
                   : undefined
               }
               onClick={() => handleNavigate(item.id)}
-              className={`group relative w-full flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-2xl text-sm font-medium transition-colors whitespace-nowrap ${
-                isActive ? 'text-violet-950 font-bold' : 'text-violet-100/90 hover:bg-white/10 hover:text-white'
+              className={`group relative w-full flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-2xl text-sm transition-colors whitespace-nowrap ${
+                isActive ? 'font-bold text-[var(--theme-nav-active-fg)]' : 'font-medium theme-nav-inactive'
               }`}
             >
               {isActive && (
                 <motion.span
                   layoutId={`sidebar-active-pill-${scope}`}
                   transition={{ type: 'spring', stiffness: 460, damping: 32 }}
-                  className="absolute inset-0 rounded-2xl bg-white shadow-md shadow-violet-950/25"
+                  className="absolute inset-0 rounded-2xl bg-[var(--theme-nav-active-bg)] shadow-md"
                 />
               )}
               <span className="relative z-10 flex items-center gap-3">
@@ -930,7 +991,7 @@ function AppShell() {
               {item.badge ? (
                 <span
                   className={`relative z-10 px-1.5 py-0.5 rounded-md text-[10px] font-bold font-mono-nums ${
-                    isActive ? 'bg-violet-700 text-white' : 'bg-white/20 text-white'
+                    isActive ? 'theme-btn-primary' : 'theme-header-chip border'
                   }`}
                 >
                   {item.badge}
@@ -941,33 +1002,35 @@ function AppShell() {
         })}
       </div>
 
-      <div className="pt-4 mt-4 border-t border-white/15 space-y-2">
+      <div className="pt-4 mt-4 border-t border-current/15 space-y-2">
         {!isCompiledShell() && <PWAInstallButton variant="sidebar" />}
         <button
           type="button"
           onClick={() => signOutUser()}
-          className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-semibold text-violet-200 hover:text-white hover:bg-rose-500/30 transition-colors"
+          className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-semibold theme-nav-inactive hover:bg-rose-500/20 transition-colors"
         >
           <LogOut className="w-4 h-4 shrink-0" />
-          <span>Déconnexion ({user.email?.split('@')[0]})</span>
+          <span className="truncate">
+            Déconnexion ({user.displayName || formatAuthIdentifierForDisplay(user.email).split('@')[0]})
+          </span>
         </button>
       </div>
     </>
   );
 
   return (
-    <div className="min-h-screen text-[#1e1038] flex flex-col relative overflow-x-clip">
+    <div className="min-h-screen theme-text-ink flex flex-col relative overflow-x-clip">
       <OfflineIndicator />
       <FloatingAcademicBackdrop motif={activeMotif} />
 
-      {/* Top Bar — Google Material Expressive Royal Violet & Crisp White */}
-      <header className="no-print sticky top-0 z-30 bg-gradient-to-r from-violet-950 via-violet-800 to-indigo-900 text-white border-b border-violet-700/80 shadow-md px-3 sm:px-6 h-16 flex items-center justify-between gap-2 sm:gap-4 max-w-full">
+      {/* Top Bar — Dynamic School Uniform Theme */}
+      <header className="no-print sticky top-0 z-30 theme-surface-header border-b shadow-md px-3 sm:px-6 h-16 flex items-center justify-between gap-2 sm:gap-4 max-w-full">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <motion.button
             type="button"
             whileTap={{ scale: 0.9 }}
             onClick={() => setMobileMenuOpen((v) => !v)}
-            className="lg:hidden p-2 rounded-full text-violet-100 hover:bg-white/15 shrink-0"
+            className="lg:hidden p-2 rounded-full theme-header-chip border shrink-0"
             aria-label="Menu"
           >
             <AnimatePresence mode="wait" initial={false}>
@@ -991,17 +1054,45 @@ function AppShell() {
             onClick={() => handleNavigate('hub')}
             className="group flex items-center gap-2 sm:gap-2.5 whitespace-nowrap shrink-0"
           >
-            <span className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl group-hover:rounded-2xl bg-white text-violet-900 flex items-center justify-center shadow-xs transition-all duration-200 group-hover:-rotate-6">
+            <span className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl group-hover:rounded-2xl theme-nav-active flex items-center justify-center shadow-xs transition-all duration-200 group-hover:-rotate-6">
               <GraduationCap className="w-4 h-4 sm:w-5 sm:h-5" />
             </span>
-            <span className="text-sm sm:text-base font-extrabold tracking-tight text-white">
-              School<span className="text-violet-200">aria</span>
+            <span className="text-sm sm:text-base font-extrabold tracking-tight">
+              School<span className="theme-header-subtext">aria</span>
             </span>
           </motion.button>
+
+          {workspaces.length > 1 ? (
+            <div className="flex items-center gap-1.5 min-w-0 max-w-[165px] sm:max-w-[230px]">
+              <Building2 className="w-3.5 h-3.5 shrink-0 hidden sm:block theme-header-subtext" />
+              <select
+                aria-label="Basculer d'établissement ou de rôle"
+                value={activeWorkspace?.key ?? ''}
+                onChange={(e) => handleSelectWorkspace(e.target.value)}
+                className="w-full min-w-0 truncate px-2.5 py-1.5 rounded-full bg-white/95 border border-zinc-300 text-zinc-900 text-[11px] font-bold outline-none shadow-xs"
+              >
+                {workspaces.map((ws) => {
+                  const roleTag = ws.studentLocked
+                    ? `${ROLE_SHORT_LABELS[ws.role]} (bloqué)`
+                    : ROLE_SHORT_LABELS[ws.role];
+                  return (
+                    <option key={ws.key} value={ws.key}>
+                      {ws.school.schoolName} · {roleTag}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          ) : (
+            <span className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full theme-header-chip border text-[11px] font-semibold max-w-[200px] truncate">
+              <Building2 className="w-3 h-3 shrink-0" />
+              <span className="truncate">{school.schoolName}</span>
+            </span>
+          )}
         </div>
 
         {/* Expressive Gliding Capsule Navigation */}
-        <nav className="hidden lg:flex items-center gap-1.5 text-sm font-medium text-violet-100 bg-white/10 border border-white/15 rounded-full p-1">
+        <nav className="hidden lg:flex items-center gap-1 text-sm font-medium theme-header-chip border rounded-full p-1">
           {visibleNavItems.slice(0, 5).map((item) => {
             const isActive =
               activeTab === item.id || (activeTab === 'classdetail' && item.id === 'makelist');
@@ -1010,22 +1101,22 @@ function AppShell() {
                 key={item.id}
                 type="button"
                 onClick={() => handleNavigate(item.id)}
-                className={`relative whitespace-nowrap shrink-0 flex items-center gap-1.5 px-3.5 py-1.5 rounded-full transition-colors ${
-                  isActive ? 'text-violet-950 font-bold' : 'text-violet-100 hover:text-white'
+                className={`relative whitespace-nowrap shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors ${
+                  isActive ? 'text-[var(--theme-nav-active-fg)] font-bold' : 'theme-nav-inactive'
                 }`}
               >
                 {isActive && (
                   <motion.span
                     layoutId="top-nav-pill"
                     transition={{ type: 'spring', stiffness: 480, damping: 33 }}
-                    className="absolute inset-0 rounded-full bg-white shadow-sm"
+                    className="absolute inset-0 rounded-full bg-[var(--theme-nav-active-bg)] shadow-sm"
                   />
                 )}
                 <span className="relative z-10">{item.label}</span>
                 {item.badge ? (
                   <span
                     className={`relative z-10 px-1.5 py-0.5 rounded-full text-[10px] font-bold font-mono-nums ${
-                      isActive ? 'bg-violet-700 text-white' : 'bg-white text-violet-900'
+                      isActive ? 'theme-btn-primary' : 'theme-nav-active'
                     }`}
                   >
                     {item.badge}
@@ -1037,6 +1128,16 @@ function AppShell() {
         </nav>
 
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {canChangeSchoolThemeForRole(effectiveRole) && (
+            <div className="hidden xl:block">
+              <UniformThemePicker
+                variant="header"
+                value={activeSchoolTheme}
+                disabled={savingTheme}
+                onChange={(nextTheme) => void handleQuickThemeChange(nextTheme)}
+              />
+            </div>
+          )}
           {!isCompiledShell() && (
             <div className="hidden sm:block">
               <PWAInstallButton variant="header" />
@@ -1050,8 +1151,8 @@ function AppShell() {
             title="Notifications"
             className={`relative w-10 h-10 rounded-full flex items-center justify-center transition-colors border ${
               notifPanelOpen
-                ? 'bg-white text-violet-900 border-white shadow-md'
-                : 'bg-white/12 hover:bg-white/22 text-white border-white/20'
+                ? 'theme-nav-active shadow-md'
+                : 'theme-header-chip'
             }`}
           >
             <Bell className="w-4 h-4" />
@@ -1072,7 +1173,7 @@ function AppShell() {
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.95 }}
               onClick={() => handleNavigate('inscription')}
-              className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-full bg-white hover:bg-violet-100 text-violet-950 text-xs font-bold transition-colors whitespace-nowrap shrink-0 shadow-xs"
+              className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-full theme-nav-active text-xs font-bold transition-colors whitespace-nowrap shrink-0 shadow-xs"
             >
               <span className="sm:hidden">+ Élève</span>
               <span className="hidden sm:inline">+ Inscrire un élève</span>
@@ -1083,7 +1184,7 @@ function AppShell() {
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.95 }}
               onClick={() => handleNavigate('messages')}
-              className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-full bg-white hover:bg-violet-100 text-violet-950 text-xs font-bold transition-colors whitespace-nowrap shrink-0 shadow-xs"
+              className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-full theme-nav-active text-xs font-bold transition-colors whitespace-nowrap shrink-0 shadow-xs"
             >
               Messagerie
             </motion.button>
@@ -1099,14 +1200,14 @@ function AppShell() {
           <>
             <div
               onClick={() => setNotifPanelOpen(false)}
-              className="fixed inset-0 z-40 bg-violet-950/25 sm:bg-transparent"
+              className="fixed inset-0 z-40 bg-black/25 sm:bg-transparent"
               aria-hidden="true"
             />
-            <div className="fixed top-[4.25rem] left-3 right-3 sm:left-auto sm:right-6 sm:w-[380px] max-h-[78dvh] flex flex-col rounded-3xl bg-white/98 backdrop-blur-xl border border-violet-200 shadow-2xl shadow-violet-950/25 z-50 text-zinc-900 overflow-hidden">
-              <div className="px-4 py-3 border-b border-violet-100 flex items-center justify-between gap-2 bg-violet-50/70">
+            <div className="fixed top-[4.25rem] left-3 right-3 sm:left-auto sm:right-6 sm:w-[380px] max-h-[78dvh] flex flex-col rounded-3xl bg-white/98 backdrop-blur-xl border theme-border-soft shadow-2xl z-50 text-zinc-900 overflow-hidden">
+              <div className="px-4 py-3 border-b theme-border-soft flex items-center justify-between gap-2 theme-pill-soft">
                 <div>
-                  <p className="text-xs font-extrabold text-violet-950">Notifications</p>
-                  <p className="text-[11px] text-violet-700">
+                  <p className="text-xs font-extrabold theme-text-ink">Notifications</p>
+                  <p className="text-[11px] theme-text-accent">
                     {unreadNotifsCount > 0
                       ? `${unreadNotifsCount} non lue${unreadNotifsCount > 1 ? 's' : ''}`
                       : 'Tout est à jour'}
@@ -1118,18 +1219,33 @@ function AppShell() {
                       type="button"
                       onClick={() => {
                         void markAllNotificationsRead(
-                          notifications.filter((n) => !n.read).map((n) => n.id)
+                          visibleNotifications.filter((n) => !n.read).map((n) => n.id)
                         );
                       }}
-                      className="px-2.5 py-1 rounded-lg bg-violet-700 hover:bg-violet-800 text-white text-[11px] font-bold"
+                      className="px-2.5 py-1 rounded-lg theme-btn-primary text-[11px] font-bold"
                     >
                       Tout lu
+                    </button>
+                  )}
+                  {visibleNotifications.some((n) => n.read) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void cleanupNotificationsBulk(
+                          visibleNotifications.filter((n) => n.read),
+                          actorEmail,
+                          effectiveRole
+                        );
+                      }}
+                      className="px-2 py-1 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 text-[11px] font-bold text-zinc-700"
+                    >
+                      Nettoyer lues
                     </button>
                   )}
                   <button
                     type="button"
                     onClick={() => setNotifPanelOpen(false)}
-                    className="p-1.5 rounded-lg text-zinc-500 hover:bg-violet-100"
+                    className="p-1.5 rounded-lg text-zinc-500 hover:bg-zinc-100"
                     aria-label="Fermer"
                   >
                     <X className="w-4 h-4" />
@@ -1138,16 +1254,16 @@ function AppShell() {
               </div>
 
               <div className="overflow-y-auto divide-y divide-zinc-100 flex-1">
-                {notifications.length === 0 ? (
+                {visibleNotifications.length === 0 ? (
                   <p className="p-6 text-center text-xs text-zinc-500">Aucune notification pour le moment.</p>
                 ) : (
-                  [...notifications]
+                  [...visibleNotifications]
                     .sort((a, b) => b.id.localeCompare(a.id))
                     .slice(0, 6)
                     .map((n) => (
                       <div
                         key={n.id}
-                        className={`p-3.5 flex items-start gap-2.5 text-xs ${!n.read ? 'bg-violet-50/50' : ''}`}
+                        className={`p-3.5 flex items-start gap-2.5 text-xs ${!n.read ? 'bg-zinc-50/80' : ''}`}
                       >
                         <div
                           className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
@@ -1155,7 +1271,7 @@ function AppShell() {
                               ? 'bg-emerald-100 text-emerald-700'
                               : n.type === 'absence'
                               ? 'bg-amber-100 text-amber-700'
-                              : 'bg-violet-100 text-violet-700'
+                              : 'theme-pill-soft border'
                           }`}
                         >
                           {n.type === 'grade' ? (
@@ -1169,16 +1285,28 @@ function AppShell() {
                         <div className="min-w-0 flex-1">
                           <div className="flex items-start justify-between gap-2">
                             <p className="font-bold text-zinc-900 break-words">{n.title}</p>
-                            {!n.read && (
+                            <div className="flex items-center gap-1 shrink-0">
+                              {!n.read && (
+                                <button
+                                  type="button"
+                                  onClick={() => void markNotificationRead(n.id)}
+                                  className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md bg-zinc-900 text-white text-[10px] font-bold"
+                                >
+                                  <Check className="w-3 h-3" />
+                                  Vu
+                                </button>
+                              )}
                               <button
                                 type="button"
-                                onClick={() => void markNotificationRead(n.id)}
-                                className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md bg-zinc-900 text-white text-[10px] font-bold shrink-0"
+                                onClick={() =>
+                                  void dismissOrDeleteNotification(n, actorEmail, effectiveRole)
+                                }
+                                title="Supprimer"
+                                className="p-1 rounded-md text-zinc-400 hover:text-rose-600 hover:bg-rose-50"
                               >
-                                <Check className="w-3 h-3" />
-                                Vu
+                                <Trash2 className="w-3.5 h-3.5" />
                               </button>
-                            )}
+                            </div>
                           </div>
                           <p className="text-[11px] text-zinc-600 mt-0.5 line-clamp-2 break-words">
                             {n.message}
@@ -1189,16 +1317,16 @@ function AppShell() {
                 )}
               </div>
 
-              <div className="p-2.5 border-t border-violet-100 bg-violet-50/50">
+              <div className="p-2.5 border-t theme-border-soft bg-zinc-50/70">
                 <button
                   type="button"
                   onClick={() => {
                     setNotifPanelOpen(false);
                     handleNavigate('notifications');
                   }}
-                  className="w-full py-2 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-xs font-bold transition-colors"
+                  className="w-full py-2 rounded-xl theme-btn-primary text-xs font-bold transition-colors"
                 >
-                  Ouvrir le centre de notifications ({notifications.length})
+                  Ouvrir le centre de notifications ({visibleNotifications.length})
                 </button>
               </div>
             </div>
@@ -1207,8 +1335,8 @@ function AppShell() {
         )}
 
       <div className="flex-1 flex max-w-[1440px] w-full mx-auto relative z-10">
-        {/* Desktop Sidebar — Deep Royal Violet & Crisp White */}
-        <aside className="no-print hidden lg:flex w-64 shrink-0 border-r border-violet-800/70 bg-gradient-to-b from-violet-950 via-[#2e1065] to-indigo-950 text-violet-100 p-4 flex-col justify-between">
+        {/* Desktop Sidebar — Dynamic School Uniform Theme */}
+        <aside className="no-print hidden lg:flex w-64 shrink-0 border-r theme-surface-header p-4 flex-col justify-between">
           {renderSidebarBody('desktop')}
         </aside>
 
@@ -1222,14 +1350,14 @@ function AppShell() {
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.18 }}
                 onClick={() => setMobileMenuOpen(false)}
-                className="no-print lg:hidden fixed inset-0 top-16 z-30 bg-violet-950/55 backdrop-blur-xs"
+                className="no-print lg:hidden fixed inset-0 top-16 z-30 bg-black/50 backdrop-blur-xs"
               />
               <motion.aside
                 initial={{ x: '-100%' }}
                 animate={{ x: 0 }}
                 exit={{ x: '-100%' }}
                 transition={{ type: 'spring', stiffness: 400, damping: 34 }}
-                className="no-print lg:hidden fixed inset-y-16 bottom-0 left-0 z-40 w-72 overflow-y-auto border-r border-violet-800/70 bg-gradient-to-b from-violet-950 via-[#2e1065] to-indigo-950 text-violet-100 p-4 flex flex-col justify-between shadow-2xl"
+                className="no-print lg:hidden fixed inset-y-16 bottom-0 left-0 z-40 w-72 overflow-y-auto border-r theme-surface-header p-4 flex flex-col justify-between shadow-2xl"
               >
                 {renderSidebarBody('mobile')}
               </motion.aside>
@@ -1287,7 +1415,6 @@ function AppShell() {
               {activeTab === 'hub' && (
                 <PersonalizedDashboard
                   effectiveRole={effectiveRole}
-                  isPreview={isPreview}
                   actorEmail={actorEmail}
                   activeMembership={activeMembership}
                   school={school}
@@ -1297,7 +1424,7 @@ function AppShell() {
                   grades={grades}
                   remarks={remarks}
                   messages={messages}
-                  notifications={notifications}
+                  notifications={visibleNotifications}
                   memberships={memberships}
                   onNavigate={handleNavigate}
                   onOpenClass={handleOpenClass}
@@ -1314,7 +1441,7 @@ function AppShell() {
                 />
               )}
 
-              {activeTab === 'inscription' && canManageStudents(effectiveRole) && (
+              {activeTab === 'inscription' && canAccessTab(effectiveRole, 'inscription') && canManageStudents(effectiveRole) && (
                 <InscriptionView
                   uid={ownerUid}
                   schoolId={school.id}
@@ -1325,27 +1452,32 @@ function AppShell() {
                 />
               )}
 
-              {activeTab === 'makelist' && (isSchoolWideStaffRole(effectiveRole) || effectiveRole === 'teacher') && (
+              {activeTab === 'makelist' && canAccessTab(effectiveRole, 'makelist') && (
                 <MakeListView
                   uid={ownerUid}
                   schoolId={school.id}
                   canManageClasses={canManageClasses(effectiveRole)}
+                  canOpenClassDetail={canAccessTab(effectiveRole, 'classdetail')}
                   classrooms={effectiveRole === 'teacher' ? scopedClassrooms : uiClassrooms}
                   students={scopedStudents}
+                  subjects={subjects}
                   grades={grades}
                   memberships={memberships}
+                  schoolMemberEmails={school.memberEmails ?? []}
                   onBack={() => handleNavigate('hub')}
                   onSelectClass={handleOpenClass}
                 />
               )}
 
-              {activeTab === 'classdetail' && (isSchoolWideStaffRole(effectiveRole) || effectiveRole === 'teacher') && (
+              {activeTab === 'classdetail' && canAccessTab(effectiveRole, 'classdetail') && (
                 <ClassRosterView
                   ownerUid={ownerUid}
                   actorEmail={actorEmail}
                   actorName={actorName}
+                  actorRole={effectiveRole}
                   canManageSchool={canManageSubjects(effectiveRole)}
                   canManageClasses={canManageClasses(effectiveRole)}
+                  canScanEnrollments={canManageStudents(effectiveRole)}
                   canEditGrades={canEditGrades(effectiveRole)}
                   school={school}
                   classe={selectedClass}
@@ -1360,13 +1492,14 @@ function AppShell() {
                 />
               )}
 
-              {activeTab === 'bulletins' && (
+              {activeTab === 'bulletins' && canAccessTab(effectiveRole, 'bulletins') && (
                 <BulletinView
                   ownerUid={ownerUid}
                   actorEmail={actorEmail}
                   actorName={actorName}
-                  readOnly={!canEditGrades(effectiveRole)}
-                  allowBatchPrint={effectiveRole !== 'parent'}
+                  actorRole={effectiveRole}
+                  readOnly={!canEditBulletinsForRole(effectiveRole)}
+                  allowBatchPrint={canBatchPrintBulletinsForRole(effectiveRole)}
                   school={school}
                   classrooms={uiClassrooms}
                   students={scopedStudents}
@@ -1378,7 +1511,7 @@ function AppShell() {
                 />
               )}
 
-              {activeTab === 'stats' && (effectiveRole === 'admin' || effectiveRole === 'censeur' || effectiveRole === 'secretaire') && (
+              {activeTab === 'stats' && canAccessTab(effectiveRole, 'stats') && (
                 <StatisticsView
                   classrooms={uiClassrooms}
                   students={uiStudents}
@@ -1388,7 +1521,7 @@ function AppShell() {
                 />
               )}
 
-              {activeTab === 'messages' && (
+              {activeTab === 'messages' && canAccessTab(effectiveRole, 'messages') && (
                 <MessagingView
                   ownerUid={ownerUid}
                   actorUid={user.uid}
@@ -1403,7 +1536,7 @@ function AppShell() {
                 />
               )}
 
-              {activeTab === 'notifications' && (
+              {activeTab === 'notifications' && canAccessTab(effectiveRole, 'notifications') && (
                 <NotificationsCenterView
                   ownerUid={ownerUid}
                   actorEmail={actorEmail}
@@ -1413,22 +1546,23 @@ function AppShell() {
                   classrooms={uiClassrooms}
                   students={scopedStudents}
                   memberships={memberships}
-                  notifications={notifications}
+                  notifications={visibleNotifications}
                 />
               )}
 
-              {activeTab === 'roles' && (effectiveRole === 'admin' || effectiveRole === 'censeur') && (
+              {activeTab === 'roles' && canAccessTab(effectiveRole, 'roles') && (
                 <RoleManagementView
                   uid={ownerUid}
                   schoolId={school.id}
-                  canAssignLeadership={effectiveRole === 'admin'}
+                  canAssignLeadership={canManageLeadershipForRole(effectiveRole)}
+                  canAssignSecretaire={canManageSecretaireForRole(effectiveRole)}
                   classrooms={uiClassrooms}
                   students={uiStudents}
                   memberships={memberships}
                 />
               )}
 
-              {activeTab === 'archives' && (effectiveRole === 'admin' || effectiveRole === 'censeur' || effectiveRole === 'secretaire') && (
+              {activeTab === 'archives' && canAccessTab(effectiveRole, 'archives') && (
                 <ArchivesView
                   schoolName={school.schoolName}
                   archives={archives}
@@ -1436,11 +1570,11 @@ function AppShell() {
                 />
               )}
 
-              {activeTab === 'audit' && effectiveRole === 'admin' && (
+              {activeTab === 'audit' && canAccessTab(effectiveRole, 'audit') && (
                 <AuditLogsView school={school} auditLogs={auditLogs} />
               )}
 
-              {activeTab === 'assistant' && (effectiveRole === 'admin' || effectiveRole === 'censeur' || effectiveRole === 'teacher') && (
+              {activeTab === 'assistant' && canAccessTab(effectiveRole, 'assistant') && (
                 <AiAssistantView
                   school={school}
                   students={scopedStudents}
@@ -1448,11 +1582,11 @@ function AppShell() {
                 />
               )}
 
-              {activeTab === 'settings' && effectiveRole === 'admin' && (
+              {activeTab === 'settings' && canAccessTab(effectiveRole, 'settings') && (
                 <SchoolSetupForm
-                  key={school.id}
+                  key={`${school.id}_${school.theme || 'violet'}`}
                   isEdit
-                  isOwner={actualRole === 'admin' && !isPreview}
+                  isOwner={canManageYearLifecycleForRole(effectiveRole) && school.ownerId === user.uid}
                   defaultAdminName={school.adminName}
                   initialValues={{
                     schoolName: school.schoolName,
@@ -1465,19 +1599,26 @@ function AppShell() {
                     address: school.address,
                     city: school.city,
                     registrationCode: school.registrationCode,
+                    theme: activeSchoolTheme,
                   }}
                   onExportBackup={handleExportLocalBackup}
                   onOpenYearTransition={() => setYearModalOpen(true)}
                   onOpenArchives={() => handleNavigate('archives')}
                   onDeleteSchool={async () => {
+                    if (school.ownerId !== user.uid) {
+                      throw new Error('Seul le Proviseur propriétaire peut supprimer cet établissement.');
+                    }
                     await deleteSchoolCascade(ownerUid, school.id, school.schoolName);
                     setActiveWorkspaceKey(null);
-                    setPreviewRole(null);
                     setActiveTab('hub');
                   }}
                   onCancel={() => handleNavigate('hub')}
                   onSubmit={async (values) => {
                     await saveSchoolProfile(ownerUid, values, false, school.id);
+                    if (values.theme) {
+                      savePreviewTheme(values.theme);
+                      applySchoolThemeToDocument(values.theme);
+                    }
                     handleNavigate('hub');
                   }}
                 />
@@ -1486,7 +1627,7 @@ function AppShell() {
         </main>
       </div>
 
-      {actualRole === 'admin' && (
+      {canManageYearLifecycleForRole(effectiveRole) && (
         <AcademicYearModal
           open={yearModalOpen}
           uid={ownerUid}

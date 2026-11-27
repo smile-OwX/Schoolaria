@@ -14,13 +14,14 @@ import {
   KeyRound,
   Link2,
   LogOut,
-  Mail,
   MailCheck,
+  Phone,
   RefreshCw,
   Server,
   ShieldCheck,
   Trash2,
   UserCheck,
+  UserPlus,
 } from 'lucide-react';
 import type { User } from 'firebase/auth';
 import {
@@ -31,24 +32,38 @@ import {
   isCompiledShell,
   isElectronDesktop,
   linkGoogleAccountToCurrentUser,
-  registerWithEmailPassword,
+  registerWithPhonePassword,
   reloadCurrentUser,
   resendVerificationEmail,
   sendPasswordReset,
   signInWithDesktopToken,
-  signInWithEmailPassword,
   signInWithGoogle,
+  signInWithPhoneOrEmailPassword,
   signOutUser,
 } from '../lib/firebase.ts';
+import {
+  COUNTRY_DIAL_CODES,
+  formatAuthIdentifierForDisplay,
+  phoneToAuthEmail,
+  resolveIdentifierToAuthEmail,
+} from '../lib/phoneAuth.ts';
 import {
   getApiBaseUrl,
   getSavedApiBaseUrl,
   setSavedApiBaseUrl,
 } from '../lib/apiClient.ts';
+import {
+  SchoolUniformTheme,
+  applySchoolThemeToDocument,
+  getSavedPreviewTheme,
+  normalizeSchoolTheme,
+  savePreviewTheme,
+} from '../lib/schoolTheme.ts';
 import { SchoolProfile } from '../types/school.ts';
 import { PWAInstallButton } from './PWAInstallBanner.tsx';
 import { usePWAInstall } from '../hooks/usePWAInstall.ts';
 import { ConfirmModal } from './ConfirmModal.tsx';
+import { UniformThemePicker } from './UniformThemePicker.tsx';
 
 interface DesktopBridgeWindow extends Window {
   schoolariaDesktop?: {
@@ -104,14 +119,14 @@ export function DesktopBrowserAuthBridge({ nonce }: { nonce: string }) {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6 relative z-10">
-      <div className="max-w-md w-full bg-white/95 backdrop-blur-xs border border-violet-300/80 rounded-2xl overflow-hidden shadow-xl">
-        <div className="bg-gradient-to-r from-violet-950 via-violet-800 to-indigo-900 text-white p-6 flex items-center gap-3">
-          <div className="w-11 h-11 rounded-xl bg-white text-violet-900 flex items-center justify-center shrink-0">
+      <div className="max-w-md w-full bg-white/95 backdrop-blur-xs border theme-border-soft rounded-2xl overflow-hidden shadow-xl">
+        <div className="theme-surface-header p-6 flex items-center gap-3 border-b">
+          <div className="w-11 h-11 rounded-xl theme-nav-active flex items-center justify-center shrink-0">
             <GraduationCap className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-xl font-extrabold text-white">Schoolaria PC</h1>
-            <p className="text-xs text-violet-200">Validation sécurisée du compte Google</p>
+            <h1 className="text-xl font-extrabold">Schoolaria</h1>
+            <p className="text-xs theme-header-subtext">Validation sécurisée du compte Google</p>
           </div>
         </div>
 
@@ -121,18 +136,18 @@ export function DesktopBrowserAuthBridge({ nonce }: { nonce: string }) {
               <div className="w-12 h-12 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center mx-auto">
                 <CheckCircle2 className="w-6 h-6" />
               </div>
-              <h2 className="text-lg font-bold text-violet-950">Connexion réussie !</h2>
+              <h2 className="text-lg font-bold theme-text-ink">Connexion réussie !</h2>
               <p className="text-sm text-zinc-600">
-                Session validée pour <strong>{doneEmail}</strong>. Vous pouvez fermer cet onglet et retourner dans l’application <strong>Schoolaria PC</strong>.
+                Session validée pour <strong>{doneEmail}</strong>. Vous pouvez fermer cet onglet et retourner dans l’application <strong>Schoolaria</strong>.
               </p>
             </div>
           ) : (
             <>
-              <h2 className="text-lg font-bold text-violet-950 mb-2">
-                Finaliser la connexion PC
+              <h2 className="text-lg font-bold theme-text-ink mb-2">
+                Finaliser la connexion
               </h2>
               <p className="text-sm text-zinc-600 leading-relaxed mb-6">
-                Sélectionnez votre compte Google dans votre navigateur pour connecter instantanément l’application bureau Schoolaria.
+                Sélectionnez votre compte Google dans votre navigateur pour connecter instantanément Schoolaria.
               </p>
 
               {error && (
@@ -144,7 +159,7 @@ export function DesktopBrowserAuthBridge({ nonce }: { nonce: string }) {
               <button
                 onClick={handleAuthorize}
                 disabled={loading}
-                className="w-full flex items-center justify-center gap-3 px-4 py-3 bg-violet-700 hover:bg-violet-800 text-white rounded-xl text-sm font-semibold transition-all shadow-xs disabled:opacity-60"
+                className="w-full flex items-center justify-center gap-3 px-4 py-3 theme-btn-primary rounded-xl text-sm font-semibold transition-all shadow-xs disabled:opacity-60"
               >
                 {loading ? 'Validation Google en cours...' : 'Choisir mon compte Google'}
               </button>
@@ -161,19 +176,24 @@ export function AuthGate({
   onSuccess,
   onVerificationComplete,
 }: AuthGateProps) {
-  const [authTab, setAuthTab] = useState<'email' | 'google'>('email');
-  const [emailMode, setEmailMode] = useState<'login' | 'register'>('login');
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [countryCode, setCountryCode] = useState('228');
   const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [previewTheme, setPreviewTheme] = useState<SchoolUniformTheme>(() => getSavedPreviewTheme());
 
   const [loading, setLoading] = useState(false);
   const [browserNotice, setBrowserNotice] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    applySchoolThemeToDocument(previewTheme);
+  }, [previewTheme]);
 
   const compiledShell = isCompiledShell();
   const isDesktopApp = isElectronDesktop();
@@ -262,20 +282,19 @@ export function AuthGate({
     }
   };
 
-  const handleEmailSubmit = async (e: React.FormEvent) => {
+  const handleCredentialSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccessNotice(null);
     setBrowserNotice(null);
 
-    if (!email.trim() || !password) {
-      setError('Veuillez saisir votre adresse e-mail et votre mot de passe.');
-      return;
-    }
-
-    if (emailMode === 'register') {
+    if (authMode === 'register') {
       if (fullName.trim().length < 2) {
-        setError('Veuillez indiquer votre nom complet.');
+        setError('Veuillez indiquer votre nom complet (au moins 2 caractères).');
+        return;
+      }
+      if (!phoneToAuthEmail(identifier, countryCode)) {
+        setError('Veuillez saisir un numéro de téléphone valide (ex : 90 12 34 56).');
         return;
       }
       if (password.length < 6) {
@@ -286,52 +305,65 @@ export function AuthGate({
         setError('Les deux mots de passe ne correspondent pas.');
         return;
       }
+    } else {
+      if (!identifier.trim() || !password) {
+        setError('Veuillez saisir votre numéro de téléphone (ou e-mail) et votre mot de passe.');
+        return;
+      }
+      const resolved = resolveIdentifierToAuthEmail(identifier, countryCode);
+      if (!resolved.authEmail) {
+        setError('Numéro de téléphone ou e-mail invalide. Exemple : 90 12 34 56.');
+        return;
+      }
     }
 
     setLoading(true);
     try {
-      if (emailMode === 'register') {
-        const { user, verificationEmailSent, verificationError } = await registerWithEmailPassword(
+      if (authMode === 'register') {
+        const createdUser = await registerWithPhonePassword(
           fullName,
-          email,
-          password
+          identifier,
+          password,
+          countryCode
         );
-        if (user.emailVerified) {
-          onSuccess?.();
-        } else if (verificationEmailSent) {
-          setSuccessNotice(
-            `Compte créé ! Un lien de confirmation vient d’être envoyé à ${user.email}. Cliquez sur le lien reçu (vérifiez aussi les spams) puis revenez ici.`
-          );
-        } else {
-          setError(
-            verificationError ||
-              `Compte créé pour ${user.email}, mais l’e-mail de vérification n’a pas pu partir immédiatement. Cliquez sur « Renvoyer l’e-mail » dans quelques instants.`
-          );
-        }
+        onVerificationComplete?.(createdUser);
+        onSuccess?.();
       } else {
-        const user = await signInWithEmailPassword(email, password);
-        if (user.emailVerified) {
+        const { user } = await signInWithPhoneOrEmailPassword(
+          identifier,
+          password,
+          countryCode
+        );
+        if (user.emailVerified || !user.email?.includes('@') || user.email.endsWith('@tel.schoolaria.app')) {
+          onVerificationComplete?.(user);
           onSuccess?.();
         }
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : formatFirebaseAuthError(err));
+      setError(err instanceof Error ? err.message : formatFirebaseAuthError(err, 'phone'));
     } finally {
       setLoading(false);
     }
   };
 
   const handleForgotPassword = async () => {
-    if (!email.trim()) {
-      setError('Saisissez d’abord votre adresse e-mail ci-dessus pour recevoir le lien de réinitialisation.');
+    const cleanInput = identifier.trim();
+    if (!cleanInput) {
+      setError('Saisissez d’abord votre identifiant ci-dessus.');
+      return;
+    }
+    if (!cleanInput.includes('@')) {
+      setError(
+        'Les comptes créés par numéro de téléphone n’ont pas d’e-mail de récupération. Contactez la direction de votre établissement en cas d’oubli.'
+      );
       return;
     }
     setLoading(true);
     setError(null);
     setSuccessNotice(null);
     try {
-      await sendPasswordReset(email);
-      setSuccessNotice(`Lien de réinitialisation envoyé à ${email.trim().toLowerCase()}.`);
+      await sendPasswordReset(cleanInput);
+      setSuccessNotice(`Lien de réinitialisation envoyé à ${cleanInput.toLowerCase()}.`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : formatFirebaseAuthError(err));
     } finally {
@@ -393,31 +425,31 @@ export function AuthGate({
         initial={{ opacity: 0, y: 18 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-        className="max-w-md w-full bg-white/95 backdrop-blur-xs border border-violet-300/80 rounded-2xl overflow-hidden shadow-xl"
+        className="max-w-md w-full bg-white/95 backdrop-blur-xs border theme-border-soft rounded-2xl overflow-hidden shadow-xl"
       >
-        <div className="bg-gradient-to-r from-violet-950 via-violet-800 to-indigo-900 text-white p-6 flex items-center gap-3">
-          <div className="w-11 h-11 rounded-xl bg-white text-violet-900 flex items-center justify-center shrink-0">
+        <div className="theme-surface-header px-6 py-5 flex items-center gap-3 border-b">
+          <div className="w-11 h-11 rounded-xl theme-nav-active flex items-center justify-center shrink-0">
             <GraduationCap className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-xl font-extrabold text-white">Schoolaria</h1>
-            <p className="text-xs text-violet-200">Direction · Censeur · Secrétaire · Enseignants · Parents</p>
+            <h1 className="text-xl font-extrabold">Schoolaria</h1>
+            <p className="text-xs theme-header-subtext">Direction · Censeur · Secrétaire · Enseignants · Parents</p>
           </div>
         </div>
 
-        <div className="p-6 sm:p-8">
+        <div className="p-5 sm:p-6">
           {pendingVerificationUser ? (
             <div className="space-y-4">
-              <div className="w-12 h-12 rounded-2xl bg-violet-100 border border-violet-200 text-violet-800 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-2xl theme-pill-soft border flex items-center justify-center">
                 <MailCheck className="w-6 h-6" />
               </div>
               <div>
-                <h2 className="text-lg font-bold text-violet-950">
+                <h2 className="text-lg font-bold theme-text-ink">
                   Vérifiez votre adresse e-mail
                 </h2>
                 <p className="text-xs sm:text-sm text-zinc-600 leading-relaxed mt-1">
                   Pour sécuriser l’accès aux dossiers et bulletins scolaires, confirmez l’adresse{' '}
-                  <strong className="text-violet-900">{pendingVerificationUser.email}</strong> via le lien envoyé dans votre boîte mail.
+                  <strong className="theme-text-ink">{pendingVerificationUser.email}</strong> via le lien envoyé dans votre boîte mail.
                 </p>
               </div>
 
@@ -436,7 +468,7 @@ export function AuthGate({
                 type="button"
                 onClick={handleCheckEmailVerified}
                 disabled={loading}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-sm font-bold transition-colors disabled:opacity-60"
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl theme-btn-primary text-sm font-bold transition-colors disabled:opacity-60"
               >
                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                 <span>J’ai vérifié mon e-mail · Continuer</span>
@@ -447,7 +479,7 @@ export function AuthGate({
                   type="button"
                   onClick={handleResendVerification}
                   disabled={loading}
-                  className="px-3 py-2 rounded-xl border border-violet-200 bg-violet-50 hover:bg-violet-100 text-xs font-semibold text-violet-900 transition-colors disabled:opacity-60"
+                  className="px-3 py-2 rounded-xl border theme-pill-soft text-xs font-semibold transition-colors disabled:opacity-60"
                 >
                   Renvoyer l’e-mail
                 </button>
@@ -464,51 +496,73 @@ export function AuthGate({
             </div>
           ) : (
             <>
-              <h2 className="text-lg font-bold text-violet-950 mb-1.5 text-balance">
-                Connectez votre espace scolaire
-              </h2>
-              <p className="text-xs sm:text-sm text-zinc-600 leading-relaxed mb-4">
-                Choisissez votre mode de connexion : identifiant vérifié par e-mail ou compte Google simple.
-              </p>
-
-              {/* Dual Auth Method Tabs */}
-              <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-violet-100/80 border border-violet-200 mb-5">
+              {/* Primary Connexion / Inscription Switch */}
+              <div
+                role="tablist"
+                aria-label="Mode d'accès"
+                className="grid grid-cols-2 gap-1.5 p-1 rounded-xl theme-pill-soft border mb-4"
+              >
                 <button
                   type="button"
+                  role="tab"
+                  aria-selected={authMode === 'login'}
                   onClick={() => {
-                    setAuthTab('email');
+                    setAuthMode('login');
+                    setPassword('');
+                    setConfirmPassword('');
                     setError(null);
+                    setSuccessNotice(null);
                     setBrowserNotice(null);
                   }}
-                  className={`py-2 px-3 rounded-lg text-xs font-bold inline-flex items-center justify-center gap-1.5 transition-all ${
-                    authTab === 'email'
-                      ? 'bg-violet-700 text-white shadow-xs'
-                      : 'text-violet-900 hover:bg-white/60'
+                  className={`min-h-[42px] py-2 px-3 rounded-lg text-xs font-bold inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 transition-all ${
+                    authMode === 'login'
+                      ? 'theme-btn-primary shadow-xs'
+                      : 'theme-text-ink hover:bg-white/60'
                   }`}
                 >
-                  <Mail className="w-3.5 h-3.5" />
-                  E-mail & Mot de passe
+                  <KeyRound className="w-3.5 h-3.5 shrink-0" />
+                  <span>Se connecter</span>
                 </button>
                 <button
                   type="button"
+                  role="tab"
+                  aria-selected={authMode === 'register'}
                   onClick={() => {
-                    setAuthTab('google');
+                    setAuthMode('register');
+                    if (identifier.includes('@')) setIdentifier('');
+                    setPassword('');
+                    setConfirmPassword('');
                     setError(null);
                     setSuccessNotice(null);
+                    setBrowserNotice(null);
                   }}
-                  className={`py-2 px-3 rounded-lg text-xs font-bold inline-flex items-center justify-center gap-1.5 transition-all ${
-                    authTab === 'google'
-                      ? 'bg-violet-700 text-white shadow-xs'
-                      : 'text-violet-900 hover:bg-white/60'
+                  className={`min-h-[42px] py-2 px-3 rounded-lg text-xs font-bold inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 transition-all ${
+                    authMode === 'register'
+                      ? 'theme-btn-primary shadow-xs'
+                      : 'theme-text-ink hover:bg-white/60'
                   }`}
                 >
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  Google Simple
+                  <UserPlus className="w-3.5 h-3.5 shrink-0" />
+                  <span>S’inscrire</span>
                 </button>
               </div>
 
+              <h2 className="text-lg font-bold theme-text-ink mb-1 text-balance">
+                {authMode === 'login'
+                  ? 'Connexion à votre espace'
+                  : 'Créer un compte Schoolaria'}
+              </h2>
+              <p className="text-xs sm:text-sm text-zinc-600 leading-relaxed mb-4">
+                {authMode === 'login'
+                  ? 'Connectez-vous avec Google ou par numéro de téléphone et mot de passe.'
+                  : 'Inscrivez-vous avec Google, ou sans compte e-mail avec votre numéro, nom et mot de passe.'}
+              </p>
+
               {error && (
-                <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 leading-relaxed">
+                <div
+                  role="alert"
+                  className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 leading-relaxed"
+                >
                   {error}
                 </div>
               )}
@@ -518,196 +572,209 @@ export function AuthGate({
                 </div>
               )}
               {browserNotice && (
-                <div className="mb-4 p-3 rounded-xl bg-violet-50 border border-violet-200 text-xs text-violet-800 leading-relaxed">
+                <div className="mb-4 p-3 rounded-xl theme-pill-soft border text-xs leading-relaxed">
                   {browserNotice}
                 </div>
               )}
 
-              {authTab === 'email' ? (
-                <form onSubmit={handleEmailSubmit} className="space-y-3.5">
-                  <div className="p-3 rounded-xl bg-violet-50 border border-violet-200 text-xs text-violet-900 leading-relaxed">
-                    <strong>Parents & Équipe sans compte Gmail :</strong> utilisez votre adresse{' '}
-                    <strong>Yahoo, Outlook, Hotmail, iCloud, Orange</strong> ou toute autre adresse e-mail.
-                  </div>
+              {/* Option 1 : Google (1 clic pour connexion ou inscription) */}
+              <button
+                type="button"
+                onClick={handleSimpleGoogleLogin}
+                disabled={loading}
+                className="w-full min-h-[44px] flex items-center justify-center gap-3 px-4 py-3 bg-white hover:bg-zinc-50 border border-zinc-300 rounded-xl text-sm font-semibold text-zinc-800 transition-all shadow-xs active:scale-[0.99] disabled:opacity-60 whitespace-nowrap"
+              >
+                <svg className="w-5 h-5 shrink-0" viewBox="0 0 48 48" aria-hidden="true">
+                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                </svg>
+                <span>
+                  {loading
+                    ? 'Connexion en cours...'
+                    : authMode === 'register'
+                    ? hasSystemBrowserAuth
+                      ? 'S’inscrire avec Google (Chrome / Edge)'
+                      : 'S’inscrire avec Google'
+                    : hasSystemBrowserAuth
+                    ? 'Se connecter avec Google (Chrome / Edge)'
+                    : 'Se connecter avec Google'}
+                </span>
+              </button>
 
-                  <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-zinc-100 border border-zinc-200">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEmailMode('login');
-                        setError(null);
-                        setSuccessNotice(null);
-                      }}
-                      className={`min-h-[40px] px-2.5 py-2 rounded-lg text-xs font-bold transition-all ${
-                        emailMode === 'login'
-                          ? 'bg-white text-violet-900 shadow-xs'
-                          : 'text-zinc-600 hover:text-zinc-900'
-                      }`}
-                    >
-                      Déjà inscrit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEmailMode('register');
-                        setError(null);
-                        setSuccessNotice(null);
-                      }}
-                      className={`min-h-[40px] px-2.5 py-2 rounded-lg text-xs font-bold transition-all ${
-                        emailMode === 'register'
-                          ? 'bg-white text-violet-900 shadow-xs'
-                          : 'text-zinc-600 hover:text-zinc-900'
-                      }`}
-                    >
-                      1ère connexion · Créer
-                    </button>
-                  </div>
+              <div className="my-3.5 flex items-center gap-3">
+                <div className="h-px flex-1 bg-zinc-200" />
+                <span className="text-[11px] font-semibold theme-text-accent whitespace-nowrap">
+                  ou sans compte Google
+                </span>
+                <div className="h-px flex-1 bg-zinc-200" />
+              </div>
 
-                  {emailMode === 'register' && (
-                    <div>
-                      <label className="block text-[11px] font-semibold text-zinc-700 mb-1">
-                        Nom complet (Parent ou Personnel) *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        autoComplete="name"
-                        value={fullName}
-                        onChange={(e) => setFullName(e.target.value)}
-                        placeholder="Ex : Mme Afiwa Mensah"
-                        className="w-full px-3.5 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm"
-                      />
-                    </div>
-                  )}
-
+              {/* Option 2 : Numéro, Nom et Mot de passe (sans e-mail requis) */}
+              <form onSubmit={handleCredentialSubmit} className="space-y-3">
+                {authMode === 'register' && (
                   <div>
-                    <label className="block text-[11px] font-semibold text-zinc-700 mb-1">
-                      Adresse e-mail *
+                    <label
+                      htmlFor="auth-fullname"
+                      className="block text-[11px] font-semibold text-zinc-700 mb-1"
+                    >
+                      Nom complet *
                     </label>
                     <input
-                      type="email"
+                      id="auth-fullname"
+                      type="text"
                       required
-                      autoComplete="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="parent@yahoo.fr ou nom@outlook.com"
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm"
+                      autoComplete="name"
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      placeholder="Ex : Mme Afiwa Mensah"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-zinc-200 theme-input outline-none text-sm"
                     />
                   </div>
+                )}
 
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-[11px] font-semibold text-zinc-700">
-                        Mot de passe *
-                      </label>
-                      {emailMode === 'login' && (
-                        <button
-                          type="button"
-                          onClick={handleForgotPassword}
-                          className="text-[11px] font-semibold text-violet-700 hover:underline"
-                        >
-                          Mot de passe oublié ?
-                        </button>
-                      )}
+                <div>
+                  <label
+                    htmlFor="auth-phone-or-id"
+                    className="block text-[11px] font-semibold text-zinc-700 mb-1"
+                  >
+                    {authMode === 'register'
+                      ? 'Numéro de téléphone *'
+                      : 'Numéro de téléphone (ou e-mail) *'}
+                  </label>
+                  <div className="flex gap-2">
+                    <select
+                      aria-label="Indicatif pays"
+                      value={countryCode}
+                      onChange={(e) => setCountryCode(e.target.value)}
+                      className="w-[112px] sm:w-[124px] shrink-0 px-2.5 py-2.5 rounded-xl border border-zinc-200 bg-zinc-50 theme-input outline-none text-xs font-semibold text-zinc-800"
+                    >
+                      {COUNTRY_DIAL_CODES.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.flag} +{c.code}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="relative flex-1 min-w-0">
+                      <Phone className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        id="auth-phone-or-id"
+                        type={authMode === 'register' ? 'tel' : 'text'}
+                        inputMode={authMode === 'register' ? 'tel' : 'text'}
+                        required
+                        autoComplete={authMode === 'register' ? 'tel' : 'username'}
+                        value={identifier}
+                        onChange={(e) => setIdentifier(e.target.value)}
+                        placeholder={
+                          authMode === 'register'
+                            ? '90 12 34 56'
+                            : '90 12 34 56 ou e-mail'
+                        }
+                        className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-zinc-200 theme-input outline-none text-sm font-mono-nums"
+                      />
                     </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label
+                      htmlFor="auth-password"
+                      className="text-[11px] font-semibold text-zinc-700"
+                    >
+                      Mot de passe *
+                    </label>
+                    {authMode === 'login' && (
+                      <button
+                        type="button"
+                        onClick={handleForgotPassword}
+                        className="text-[11px] font-semibold theme-text-accent hover:underline"
+                      >
+                        Mot de passe oublié ?
+                      </button>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <input
+                      id="auth-password"
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder={authMode === 'register' ? 'Minimum 6 caractères' : 'Votre mot de passe'}
+                      className="w-full pl-3.5 pr-11 py-2.5 rounded-xl border border-zinc-200 theme-input outline-none text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                      className="no-ripple absolute right-1 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center rounded-lg text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {authMode === 'register' && (
+                  <div>
+                    <label
+                      htmlFor="auth-confirm-password"
+                      className="block text-[11px] font-semibold text-zinc-700 mb-1"
+                    >
+                      Confirmer le mot de passe *
+                    </label>
                     <div className="relative">
                       <input
-                        type={showPassword ? 'text' : 'password'}
+                        id="auth-confirm-password"
+                        type={showConfirmPassword ? 'text' : 'password'}
                         required
-                        autoComplete={emailMode === 'login' ? 'current-password' : 'new-password'}
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        placeholder={emailMode === 'register' ? 'Minimum 6 caractères' : '••••••••'}
-                        className="w-full pl-3.5 pr-11 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm"
+                        autoComplete="new-password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="Retapez le mot de passe"
+                        className="w-full pl-3.5 pr-11 py-2.5 rounded-xl border border-zinc-200 theme-input outline-none text-sm"
                       />
                       <button
                         type="button"
-                        onClick={() => setShowPassword((v) => !v)}
-                        aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
-                        className="no-ripple absolute right-1 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center rounded-lg text-zinc-500 hover:text-violet-800 hover:bg-violet-50"
+                        onClick={() => setShowConfirmPassword((v) => !v)}
+                        aria-label={showConfirmPassword ? 'Masquer la confirmation' : 'Afficher la confirmation'}
+                        className="no-ripple absolute right-1 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center rounded-lg text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"
                       >
-                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
                   </div>
+                )}
 
-                  {emailMode === 'register' && (
-                    <div>
-                      <label className="block text-[11px] font-semibold text-zinc-700 mb-1">
-                        Confirmer le mot de passe *
-                      </label>
-                      <div className="relative">
-                        <input
-                          type={showConfirmPassword ? 'text' : 'password'}
-                          required
-                          autoComplete="new-password"
-                          value={confirmPassword}
-                          onChange={(e) => setConfirmPassword(e.target.value)}
-                          placeholder="••••••••"
-                          className="w-full pl-3.5 pr-11 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowConfirmPassword((v) => !v)}
-                          aria-label={showConfirmPassword ? 'Masquer la confirmation' : 'Afficher la confirmation'}
-                          className="no-ripple absolute right-1 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center rounded-lg text-zinc-500 hover:text-violet-800 hover:bg-violet-50"
-                        >
-                          {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                        </button>
-                      </div>
-                    </div>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full min-h-[44px] flex items-center justify-center gap-2 px-4 py-3 rounded-xl theme-btn-primary text-sm font-bold transition-all shadow-xs disabled:opacity-60 whitespace-nowrap"
+                >
+                  {authMode === 'register' ? (
+                    <UserPlus className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <KeyRound className="w-4 h-4 shrink-0" />
                   )}
+                  <span>
+                    {loading
+                      ? authMode === 'register'
+                        ? 'Création du compte...'
+                        : 'Connexion...'
+                      : authMode === 'register'
+                      ? 'Créer mon compte'
+                      : 'Se connecter'}
+                  </span>
+                </button>
 
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="w-full min-h-[44px] flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-sm font-bold transition-all shadow-xs disabled:opacity-60"
-                  >
-                    <KeyRound className="w-4 h-4" />
-                    <span>
-                      {loading
-                        ? 'Vérification...'
-                        : emailMode === 'login'
-                        ? 'Se connecter'
-                        : 'Créer et vérifier mon compte'}
-                    </span>
-                  </button>
-
-                  <p className="text-[11px] text-zinc-500 leading-relaxed pt-1">
-                    {emailMode === 'register'
-                      ? 'Parents : utilisez exactement la même adresse e-mail que celle remise au secrétariat de l’école.'
-                      : 'Si l’école vient d’enregistrer votre e-mail, passez sur « 1ère connexion · Créer » pour définir votre mot de passe.'}
-                  </p>
-                </form>
-              ) : (
-                <div className="space-y-3">
-                  <button
-                    type="button"
-                    onClick={handleSimpleGoogleLogin}
-                    disabled={loading}
-                    className="w-full flex items-center justify-center gap-3 px-4 py-3 bg-white hover:bg-zinc-50 border border-zinc-300 rounded-xl text-sm font-semibold text-zinc-800 transition-all shadow-xs active:scale-[0.99] disabled:opacity-60"
-                  >
-                    <svg className="w-5 h-5" viewBox="0 0 48 48" aria-hidden="true">
-                      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
-                      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
-                      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
-                      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
-                    </svg>
-                    <span>
-                      {loading
-                        ? 'Connexion en cours...'
-                        : hasSystemBrowserAuth
-                        ? 'Continuer avec Google (Chrome / Edge)'
-                        : 'Continuer avec Google'}
-                    </span>
-                  </button>
-                  <p className="text-[11px] text-zinc-500 leading-relaxed text-center">
-                    {hasSystemBrowserAuth
-                      ? 'Sur PC Windows, la validation s’ouvre directement dans votre navigateur habituel.'
-                      : 'Connexion directe en un clic via votre compte Google.'}
-                  </p>
-                </div>
-              )}
+                <p className="text-[11px] text-zinc-500 leading-relaxed pt-0.5">
+                  {authMode === 'register'
+                    ? 'Aucun compte e-mail requis : votre numéro de téléphone et votre mot de passe suffisent.'
+                    : 'Pas encore de compte ? Cliquez sur « S’inscrire » ci-dessus (Google ou numéro de téléphone).'}
+                </p>
+              </form>
             </>
           )}
 
@@ -716,19 +783,19 @@ export function AuthGate({
               <button
                 type="button"
                 onClick={() => setShowServerConfig((v) => !v)}
-                className="text-xs font-semibold text-violet-700 hover:underline flex items-center gap-1.5"
+                className="text-xs font-semibold theme-text-accent hover:underline flex items-center gap-1.5"
               >
                 <Globe className="w-3.5 h-3.5" />
                 {showServerConfig ? 'Masquer la config serveur Vercel' : 'Configurer l’URL du serveur Vercel / Node.js'}
               </button>
               {showServerConfig && (
-                <form onSubmit={handleSaveServerUrl} className="mt-2.5 p-3 rounded-xl bg-violet-50 border border-violet-200 space-y-2">
+                <form onSubmit={handleSaveServerUrl} className="mt-2.5 p-3 rounded-xl theme-pill-soft border space-y-2">
                   <input
                     type="url"
                     value={serverUrlInput}
                     onChange={(e) => setServerUrlInput(e.target.value)}
                     placeholder="https://mon-ecole.vercel.app"
-                    className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-xs outline-none focus:border-violet-600"
+                    className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-xs outline-none theme-input"
                   />
                   <div className="flex items-center justify-between gap-2">
                     <span className={`text-[11px] truncate ${getApiBaseUrl() ? 'text-emerald-700' : 'text-amber-700'}`}>
@@ -736,7 +803,7 @@ export function AuthGate({
                     </span>
                     <button
                       type="submit"
-                      className="px-3 py-1 rounded-lg bg-violet-700 text-white text-xs font-semibold shrink-0"
+                      className="px-3 py-1 rounded-lg theme-btn-primary text-xs font-semibold shrink-0"
                     >
                       Enregistrer
                     </button>
@@ -746,11 +813,22 @@ export function AuthGate({
             </div>
           )}
 
-          <div className="mt-6 pt-5 border-t border-violet-100 flex items-center justify-between gap-2 text-xs text-violet-700">
-            <span className="inline-flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-violet-600 shrink-0" />
-              <span>Accès cloisonné par rôle et établissement.</span>
-            </span>
+          <div className="mt-4 pt-3.5 border-t theme-border-soft space-y-3">
+            <UniformThemePicker
+              variant="compact"
+              value={previewTheme}
+              onChange={(nextTheme) => {
+                setPreviewTheme(nextTheme);
+                savePreviewTheme(nextTheme);
+              }}
+              label="Thème uniforme"
+            />
+            <div className="flex items-center justify-between gap-2 text-xs theme-text-accent">
+              <span className="inline-flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 shrink-0" />
+                <span>Accès cloisonné par rôle et établissement.</span>
+              </span>
+            </div>
           </div>
         </div>
       </motion.div>
@@ -769,6 +847,7 @@ export interface SchoolFormValues {
   address?: string;
   city?: string;
   registrationCode?: string;
+  theme?: SchoolUniformTheme;
 }
 
 interface SchoolSetupProps {
@@ -811,6 +890,9 @@ export function SchoolSetupForm({
   const [city, setCity] = useState(initialValues?.city ?? '');
   const [address, setAddress] = useState(initialValues?.address ?? '');
   const [registrationCode, setRegistrationCode] = useState(initialValues?.registrationCode ?? '');
+  const [theme, setTheme] = useState<SchoolUniformTheme>(() =>
+    normalizeSchoolTheme(initialValues?.theme ?? getSavedPreviewTheme())
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -873,6 +955,7 @@ export function SchoolSetupForm({
         address,
         city,
         registrationCode,
+        theme,
       });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Erreur lors de la sauvegarde.');
@@ -937,11 +1020,11 @@ export function SchoolSetupForm({
         initial={{ opacity: 0, x: 24 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-        className={`${isEdit ? 'w-full' : 'max-w-2xl w-full'} bg-white/95 backdrop-blur-xs border border-violet-200/80 rounded-2xl p-6 sm:p-8 shadow-sm`}
+        className={`${isEdit ? 'w-full' : 'max-w-2xl w-full'} bg-white/95 backdrop-blur-xs border theme-border-soft rounded-2xl p-6 sm:p-8 shadow-sm`}
       >
         <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-700 flex items-center justify-center shrink-0">
+            <div className="w-10 h-10 rounded-xl theme-pill-soft border flex items-center justify-center shrink-0">
               <Building2 className="w-5 h-5" />
             </div>
             <div>
@@ -958,7 +1041,7 @@ export function SchoolSetupForm({
             <button
               type="button"
               onClick={onExportBackup}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-violet-200 bg-violet-50/70 hover:bg-violet-100 text-xs font-semibold text-violet-800 transition-colors"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border theme-pill-soft text-xs font-semibold transition-colors"
             >
               <Download className="w-3.5 h-3.5" />
               Sauvegarde locale (.json)
@@ -984,7 +1067,7 @@ export function SchoolSetupForm({
                 value={schoolName}
                 onChange={(e) => setSchoolName(e.target.value)}
                 placeholder="Ex : Complexe Scolaire Les Lumières"
-                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm transition-all"
+                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 theme-input outline-none text-sm transition-all"
               />
             </div>
 
@@ -997,7 +1080,7 @@ export function SchoolSetupForm({
                 value={registrationCode}
                 onChange={(e) => setRegistrationCode(e.target.value)}
                 placeholder="Ex : MEN-2026-412"
-                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm font-mono-nums transition-all"
+                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 theme-input outline-none text-sm font-mono-nums transition-all"
               />
             </div>
           </div>
@@ -1015,7 +1098,7 @@ export function SchoolSetupForm({
                   value={adminName}
                   onChange={(e) => setAdminName(e.target.value)}
                   placeholder="Ex : M. Victor"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm transition-all"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-zinc-200 theme-input outline-none text-sm transition-all"
                 />
               </div>
             </div>
@@ -1030,7 +1113,7 @@ export function SchoolSetupForm({
                 value={academicYear}
                 onChange={(e) => setAcademicYear(e.target.value)}
                 placeholder="2026-2027"
-                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm font-mono-nums transition-all"
+                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 theme-input outline-none text-sm font-mono-nums transition-all"
               />
             </div>
 
@@ -1042,7 +1125,7 @@ export function SchoolSetupForm({
                 type="date"
                 value={endOfYearDate}
                 onChange={(e) => setEndOfYearDate(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm font-mono-nums transition-all"
+                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 theme-input outline-none text-sm font-mono-nums transition-all"
               />
             </div>
           </div>
@@ -1057,7 +1140,7 @@ export function SchoolSetupForm({
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="contact@ecole-lumieres.org"
-                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm transition-all"
+                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 theme-input outline-none text-sm transition-all"
               />
             </div>
 
@@ -1070,7 +1153,7 @@ export function SchoolSetupForm({
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="+228 22 00 00 00"
-                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm font-mono-nums transition-all"
+                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 theme-input outline-none text-sm font-mono-nums transition-all"
               />
             </div>
           </div>
@@ -1085,7 +1168,7 @@ export function SchoolSetupForm({
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
                 placeholder="Ex : Lomé"
-                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm transition-all"
+                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 theme-input outline-none text-sm transition-all"
               />
             </div>
 
@@ -1098,7 +1181,7 @@ export function SchoolSetupForm({
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
                 placeholder="Ex : Quartier Tokoin, Rue des Écoles"
-                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm transition-all"
+                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 theme-input outline-none text-sm transition-all"
               />
             </div>
           </div>
@@ -1112,9 +1195,18 @@ export function SchoolSetupForm({
               value={motto}
               onChange={(e) => setMotto(e.target.value)}
               placeholder="Discipline · Travail · Succès"
-              className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm transition-all"
+              className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 theme-input outline-none text-sm transition-all"
             />
           </div>
+
+          <UniformThemePicker
+            variant="grid"
+            value={theme}
+            onChange={(nextTheme) => {
+              setTheme(nextTheme);
+              savePreviewTheme(nextTheme);
+            }}
+          />
 
           <div className="pt-4 flex items-center justify-end gap-3">
             {onCancel && (
@@ -1129,7 +1221,7 @@ export function SchoolSetupForm({
             <button
               type="submit"
               disabled={saving}
-              className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-sm font-semibold transition-all active:scale-[0.99] disabled:opacity-60"
+              className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl theme-btn-primary text-sm font-semibold transition-all active:scale-[0.99] disabled:opacity-60"
             >
               <span>{saving ? 'Enregistrement...' : isEdit ? 'Mettre à jour' : 'Commencer'}</span>
               <ArrowRight className="w-4 h-4" />
@@ -1139,9 +1231,9 @@ export function SchoolSetupForm({
       </motion.div>
 
       {isEdit && isOwner && (onOpenYearTransition || onOpenArchives) && (
-        <div className="bg-white/95 border border-violet-200 rounded-2xl p-6 space-y-3 shadow-xs">
-          <div className="flex items-center gap-2 text-sm font-bold text-violet-950">
-            <CalendarClock className="w-4 h-4 text-violet-700 shrink-0" />
+        <div className="bg-white/95 border theme-border-soft rounded-2xl p-6 space-y-3 shadow-xs">
+          <div className="flex items-center gap-2 text-sm font-bold theme-text-ink">
+            <CalendarClock className="w-4 h-4 theme-text-accent shrink-0" />
             <span>Clôture d’année scolaire & Archivage annuel</span>
           </div>
           <p className="text-xs text-zinc-600 leading-relaxed">
@@ -1152,7 +1244,7 @@ export function SchoolSetupForm({
               <button
                 type="button"
                 onClick={onOpenYearTransition}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-xs font-bold transition-colors"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl theme-btn-primary text-xs font-bold transition-colors"
               >
                 <CalendarClock className="w-3.5 h-3.5" />
                 Passer à une nouvelle année scolaire
@@ -1162,7 +1254,7 @@ export function SchoolSetupForm({
               <button
                 type="button"
                 onClick={onOpenArchives}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-violet-200 bg-violet-50 hover:bg-violet-100 text-violet-900 text-xs font-bold transition-colors"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border theme-pill-soft text-xs font-bold transition-colors"
               >
                 <Archive className="w-3.5 h-3.5" />
                 Consulter les archives annuelles
@@ -1173,11 +1265,11 @@ export function SchoolSetupForm({
       )}
 
       {isEdit && (
-        <div className="bg-white/95 border border-violet-200 rounded-2xl p-6 space-y-3 shadow-xs">
+        <div className="bg-white/95 border theme-border-soft rounded-2xl p-6 space-y-3 shadow-xs">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm font-bold text-violet-950">
-              <Link2 className="w-4 h-4 text-violet-700 shrink-0" />
-              <span>Mon compte de connexion (E-mail & Google)</span>
+            <div className="flex items-center gap-2 text-sm font-bold theme-text-ink">
+              <Link2 className="w-4 h-4 theme-text-accent shrink-0" />
+              <span>Mon compte de connexion (Téléphone / E-mail & Google)</span>
             </div>
             {hasGoogleLinked ? (
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-700">
@@ -1189,7 +1281,7 @@ export function SchoolSetupForm({
                 type="button"
                 onClick={handleLinkGoogle}
                 disabled={linkingGoogle}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-violet-200 bg-violet-50 hover:bg-violet-100 text-xs font-bold text-violet-900 transition-colors disabled:opacity-60"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border theme-pill-soft text-xs font-bold transition-colors disabled:opacity-60"
               >
                 <Link2 className="w-3.5 h-3.5" />
                 {linkingGoogle ? 'Association...' : 'Lier mon compte Google'}
@@ -1197,7 +1289,7 @@ export function SchoolSetupForm({
             )}
           </div>
           <p className="text-xs text-zinc-600 leading-relaxed">
-            Connecté sous <strong className="text-zinc-900">{auth.currentUser?.email}</strong>. Associer votre compte Google vous permet d’utiliser indifféremment votre mot de passe ou Google.
+            Connecté sous <strong className="text-zinc-900">{formatAuthIdentifierForDisplay(auth.currentUser?.email)}</strong>. Associer votre compte Google vous permet d’utiliser indifféremment votre mot de passe ou Google.
           </p>
           {linkStatus && (
             <div
@@ -1214,13 +1306,13 @@ export function SchoolSetupForm({
       )}
 
       {isEdit && (
-        <div className="bg-white/95 border border-violet-200 rounded-2xl p-6 space-y-3 shadow-xs">
-          <div className="flex items-center gap-2 text-sm font-bold text-violet-950">
-            <Globe className="w-4 h-4 text-violet-700 shrink-0" />
+        <div className="bg-white/95 border theme-border-soft rounded-2xl p-6 space-y-3 shadow-xs">
+          <div className="flex items-center gap-2 text-sm font-bold theme-text-ink">
+            <Globe className="w-4 h-4 theme-text-accent shrink-0" />
             <span>Serveur Cloud Node.js / Vercel (PC .exe / Android .apk)</span>
           </div>
           <p className="text-xs text-zinc-600 leading-relaxed">
-            Indiquez l’URL HTTPS de votre site Vercel (ex : <code className="px-1 py-0.5 bg-violet-50 rounded">https://mon-ecole.vercel.app</code>) pour relier vos versions compilées PC et Android à Yasmine IA.
+            Indiquez l’URL HTTPS de votre site Vercel (ex : <code className="px-1 py-0.5 theme-pill-soft rounded">https://mon-ecole.vercel.app</code>) pour relier vos versions compilées PC et Android à Yasmine IA.
           </p>
           <div className="flex flex-col sm:flex-row gap-2">
             <input
@@ -1228,13 +1320,13 @@ export function SchoolSetupForm({
               value={serverUrl}
               onChange={(e) => setServerUrl(e.target.value)}
               placeholder="https://mon-ecole.vercel.app"
-              className="flex-1 px-3.5 py-2 rounded-xl border border-zinc-200 focus:border-violet-600 outline-none text-xs"
+              className="flex-1 px-3.5 py-2 rounded-xl border border-zinc-200 theme-input outline-none text-xs"
             />
             <button
               type="button"
               onClick={handleTestAndSaveServer}
               disabled={testingServer}
-              className="px-4 py-2 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0 disabled:opacity-60"
+              className="px-4 py-2 rounded-xl theme-btn-primary text-xs font-semibold transition-colors whitespace-nowrap shrink-0 disabled:opacity-60"
             >
               {testingServer ? 'Test en cours...' : 'Enregistrer & Tester'}
             </button>
@@ -1255,19 +1347,19 @@ export function SchoolSetupForm({
       )}
 
       {isEdit && !compiledShell && !isStandalone && (
-        <div className="bg-gradient-to-r from-violet-950 via-violet-900 to-indigo-900 text-white border border-violet-700 rounded-2xl p-6 space-y-4 shadow-md">
+        <div className="theme-surface-header border rounded-2xl p-6 space-y-4 shadow-md">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 text-sm font-bold text-white">
-              <Server className="w-4 h-4 text-violet-200 shrink-0" />
+            <div className="flex items-center gap-2.5 text-sm font-bold">
+              <Server className="w-4 h-4 shrink-0" />
               <span>Installation PC / Mobile & Déploiement (Serveur École ou Cloud)</span>
             </div>
             <PWAInstallButton variant="card" />
           </div>
-          <p className="text-xs text-violet-100/90 leading-relaxed">
-            <strong>1. Installation directe (PC Windows/Mac & Mobile Android/iPhone) :</strong> Grâce au mode PWA intégré, cliquez sur <em>Installer (PC / Mobile)</em> pour placer l’icône violette de votre école sur votre Bureau ou écran d’accueil sans passer par un store.
+          <p className="text-xs theme-header-subtext leading-relaxed">
+            <strong>1. Installation directe (PC Windows/Mac & Mobile Android/iPhone) :</strong> Grâce au mode PWA intégré, cliquez sur <em>Installer (PC / Mobile)</em> pour placer l’icône de votre école sur votre Bureau ou écran d’accueil sans passer par un store.
           </p>
-          <p className="text-xs text-violet-100/90 leading-relaxed">
-            <strong>2. Serveur unique Node.js / Express :</strong> Ce système embarque son propre serveur (<code className="px-1.5 py-0.5 bg-white/15 rounded">server.ts</code> sur le port 3000) compatible PC (Electron), Android (APK) et iOS.
+          <p className="text-xs theme-header-subtext leading-relaxed">
+            <strong>2. Serveur unique Node.js / Express :</strong> Ce système embarque son propre serveur (<code className="px-1.5 py-0.5 theme-header-chip rounded">server.ts</code> sur le port 3000) compatible PC (Electron), Android (APK) et iOS.
           </p>
         </div>
       )}

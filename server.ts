@@ -144,13 +144,15 @@ async function verifyFirebaseIdToken(token: string): Promise<VerifiedFirebaseTok
   if (typeof payload.iat !== 'number' || payload.iat > nowSec + 300) {
     throw new Error('Horodatage du jeton invalide.');
   }
-  if (!payload.email_verified || !payload.email) {
+  const normalizedEmail = typeof payload.email === 'string' ? payload.email.trim().toLowerCase() : '';
+  const isPhoneAccount = /^tel\.[0-9]{7,15}@tel\.schoolaria\.app$/.test(normalizedEmail);
+  if ((!payload.email_verified && !isPhoneAccount) || !normalizedEmail) {
     throw new Error('Adresse email non vérifiée.');
   }
 
   return {
     uid: payload.sub,
-    email: payload.email.toLowerCase(),
+    email: normalizedEmail,
   };
 }
 

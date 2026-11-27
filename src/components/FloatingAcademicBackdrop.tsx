@@ -62,33 +62,26 @@ export function FloatingAcademicBackdrop({ motif = 'general' }: FloatingAcademic
       aria-hidden="true"
       className="no-print fixed inset-0 pointer-events-none overflow-hidden z-0 select-none"
     >
-      {/* Rich multi-layer violet & school-color atmospheric glows */}
+      {/* Atmospheric school-uniform glows */}
       <div
-        className={`absolute -top-32 -left-24 w-[38rem] h-[38rem] rounded-full blur-3xl opacity-75 transition-colors duration-700 ${
-          motif === 'lettres-philo'
-            ? 'bg-gradient-to-br from-amber-300/65 via-rose-300/60 to-violet-400/65'
-            : motif === 'sciences-nat'
-            ? 'bg-gradient-to-br from-emerald-300/65 via-teal-300/55 to-violet-400/65'
-            : 'bg-gradient-to-br from-violet-400/75 via-purple-300/65 to-indigo-300/60'
-        }`}
+        className="absolute -top-32 -left-24 w-[38rem] h-[38rem] rounded-full opacity-75 transition-colors duration-700"
+        style={{ background: 'radial-gradient(circle, var(--theme-glow-1) 0%, transparent 70%)' }}
       />
       <div
-        className={`absolute top-1/3 -right-28 w-[34rem] h-[34rem] rounded-full blur-3xl opacity-70 transition-colors duration-700 ${
-          motif === 'lettres-philo'
-            ? 'bg-gradient-to-tr from-rose-300/65 via-violet-300/60 to-amber-200/60'
-            : motif === 'sciences-nat'
-            ? 'bg-gradient-to-tr from-sky-300/65 via-emerald-300/55 to-violet-300/60'
-            : 'bg-gradient-to-tr from-fuchsia-300/55 via-violet-400/60 to-indigo-300/60'
-        }`}
+        className="absolute top-1/3 -right-28 w-[34rem] h-[34rem] rounded-full opacity-70 transition-colors duration-700"
+        style={{ background: 'radial-gradient(circle, var(--theme-glow-2) 0%, transparent 70%)' }}
       />
-      <div className="absolute -bottom-36 left-1/3 w-[38rem] h-[30rem] rounded-full blur-3xl opacity-65 bg-gradient-to-t from-violet-400/70 via-indigo-300/60 to-transparent" />
+      <div
+        className="absolute -bottom-36 left-1/3 w-[38rem] h-[30rem] rounded-full opacity-60 transition-colors duration-700"
+        style={{ background: 'radial-gradient(circle, var(--theme-glow-1) 0%, transparent 72%)' }}
+      />
 
       {/* Subtle scientific grid line pattern */}
       <div
-        className="absolute inset-0 opacity-[0.26]"
+        className="absolute inset-0 opacity-[0.24]"
         style={{
           backgroundImage:
-            'radial-gradient(circle at 1px 1px, rgba(91, 33, 182, 0.28) 1px, transparent 0)',
+            'radial-gradient(circle at 1px 1px, rgba(var(--theme-dot-rgb), 0.3) 1px, transparent 0)',
           backgroundSize: '30px 30px',
         }}
       />

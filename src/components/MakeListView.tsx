@@ -15,6 +15,7 @@ import {
   BookOpen,
   Microscope,
   UserCheck,
+  Lock,
 } from 'lucide-react';
 import {
   CYCLES,
@@ -24,7 +25,10 @@ import {
   GradeRecord,
   LEVEL_SUGGESTIONS,
   Membership,
+  STANDARD_CLASS_PRESETS,
   Student,
+  Subject,
+  buildFixedSubjectsPreviewForClass,
   computeMoyMatiere,
   getClassroomTheme,
   sortClassrooms,
@@ -40,10 +44,13 @@ interface MakeListViewProps {
   uid: string;
   schoolId: string;
   canManageClasses: boolean;
+  canOpenClassDetail?: boolean;
   classrooms: Classroom[];
   students: Student[];
+  subjects?: Subject[];
   grades: GradeRecord[];
   memberships?: Membership[];
+  schoolMemberEmails?: string[];
   onBack: () => void;
   onSelectClass: (classe: string) => void;
 }
@@ -64,16 +71,22 @@ export function MakeListView({
   uid,
   schoolId,
   canManageClasses,
+  canOpenClassDetail = true,
   classrooms,
   students,
+  subjects = [],
   grades,
   memberships = [],
+  schoolMemberEmails = [],
   onBack,
   onSelectClass,
 }: MakeListViewProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingClass, setEditingClass] = useState<Classroom | null>(null);
+  const [inspectingClass, setInspectingClass] = useState<Classroom | null>(null);
+  const [optimisticAdded, setOptimisticAdded] = useState<Classroom[]>([]);
+  const [optimisticDeletedIds, setOptimisticDeletedIds] = useState<string[]>([]);
 
   // Add/Edit Form state
   const [clsName, setClsName] = useState('6ème C');
@@ -105,9 +118,25 @@ export function MakeListView({
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
 
   const effectiveClassrooms = useMemo<Classroom[]>(() => {
-    const allowed = classrooms.filter((c) => c.cycle === 'Collège' || c.cycle === 'Lycée');
-    if (allowed.length > 0) {
-      return sortClassrooms(allowed);
+    const deletedSet = new Set(optimisticDeletedIds);
+    const baseAllowed = classrooms.filter(
+      (c) => (c.cycle === 'Collège' || c.cycle === 'Lycée') && !deletedSet.has(c.id)
+    );
+    const mergedById = new Map<string, Classroom>();
+    for (const c of baseAllowed) {
+      mergedById.set(c.id, c);
+    }
+    for (const c of optimisticAdded) {
+      if (!deletedSet.has(c.id) && !mergedById.has(c.id) && !baseAllowed.some((x) => x.name.toLowerCase() === c.name.toLowerCase())) {
+        mergedById.set(c.id, c);
+      }
+    }
+    const merged = Array.from(mergedById.values());
+    if (merged.length > 0) {
+      return sortClassrooms(merged);
+    }
+    if (deletedSet.size > 0) {
+      return [];
     }
     return sortClassrooms(
       (Object.keys(CYCLES) as CycleType[]).flatMap((cyc) =>
@@ -128,7 +157,25 @@ export function MakeListView({
         }))
       )
     );
-  }, [classrooms, uid, schoolId]);
+  }, [classrooms, optimisticAdded, optimisticDeletedIds, uid, schoolId]);
+
+  const fixedSubjectsPreview = useMemo(
+    () =>
+      buildFixedSubjectsPreviewForClass(clsName.trim() || clsLevel, subjects, {
+        level: clsLevel,
+        cycle: clsCycle,
+        series: clsSeries,
+      }),
+    [clsName, clsLevel, clsCycle, clsSeries, subjects]
+  );
+
+  const inspectingSubjectsPreview = useMemo(
+    () =>
+      inspectingClass
+        ? buildFixedSubjectsPreviewForClass(inspectingClass.name, subjects, inspectingClass)
+        : [],
+    [inspectingClass, subjects]
+  );
 
   const classStats = useMemo(() => {
     const map: Record<string, { total: number; boys: number; girls: number; avg: number | null }> = {};
@@ -167,10 +214,11 @@ export function MakeListView({
 
   const openAddModal = () => {
     setEditingClass(null);
+    setSaveError(null);
     setClsCycle('Collège');
     setClsLevel('6ème');
-    setClsName('6ème C');
-    setClsSeries('');
+    setClsName('6e A');
+    setClsSeries('Section A · Adaptation');
     setClsMotif('general');
     setClsAccent('#6d28d9');
     setClsRoom('');
@@ -180,6 +228,16 @@ export function MakeListView({
     setClsSlogan('');
     setClsClosingDate('');
     setShowAddModal(true);
+  };
+
+  const applyClassPreset = (preset: (typeof STANDARD_CLASS_PRESETS)[number]) => {
+    setClsCycle(preset.cycle);
+    setClsLevel(preset.level);
+    setClsName(preset.name);
+    setClsSeries(preset.series);
+    setClsMotif(preset.motif);
+    setClsAccent(preset.accentColor);
+    setSaveError(null);
   };
 
   const openEditModal = (e: React.MouseEvent, cls: Classroom) => {
@@ -226,7 +284,8 @@ export function MakeListView({
 
   const handleConfirmDeleteClass = async () => {
     if (!pendingDeleteClass) return;
-    const classStudentCount = classStats[pendingDeleteClass.name]?.total ?? 0;
+    const targetCls = pendingDeleteClass;
+    const classStudentCount = classStats[targetCls.name]?.total ?? 0;
     const effectiveMode = classStudentCount === 0 ? 'delete-students' : deleteMode;
     setDeletingClass(true);
     setDeleteClassError(null);
@@ -234,14 +293,19 @@ export function MakeListView({
       const { affectedStudents } = await deleteClassroomCascade(
         uid,
         schoolId,
-        pendingDeleteClass,
+        targetCls,
         effectiveMode,
         transferTarget
       );
+      setOptimisticDeletedIds((prev) => (prev.includes(targetCls.id) ? prev : [...prev, targetCls.id]));
+      setOptimisticAdded((prev) => prev.filter((c) => c.id !== targetCls.id));
+      if (inspectingClass?.id === targetCls.id) {
+        setInspectingClass(null);
+      }
       setActionFeedback(
         affectedStudents > 0 && effectiveMode === 'transfer'
-          ? `Classe « ${pendingDeleteClass.name} » supprimée · ${affectedStudents} élève(s) transféré(s) vers ${transferTarget}.`
-          : `Classe « ${pendingDeleteClass.name} » supprimée.`
+          ? `Classe « ${targetCls.name} » supprimée · ${affectedStudents} élève(s) transféré(s) vers ${transferTarget}.`
+          : `Classe « ${targetCls.name} » supprimée avec succès.`
       );
       setPendingDeleteClass(null);
     } catch (err: unknown) {
@@ -291,8 +355,9 @@ export function MakeListView({
             previousName: editingClass.name,
           }
         );
+        setActionFeedback(`Classe « ${cleanName} » mise à jour.`);
       } else {
-        await createClassroom(uid, schoolId, {
+        const createdId = await createClassroom(uid, schoolId, {
           name: cleanName,
           level: clsLevel || cleanName,
           cycle: clsCycle,
@@ -304,7 +369,29 @@ export function MakeListView({
           headTeacherEmail: clsHeadTeacherEmail,
           slogan: clsSlogan,
           closingDate: clsClosingDate,
+          memberEmails: schoolMemberEmails,
         });
+        const newCls: Classroom = {
+          id: createdId,
+          ownerId: uid,
+          schoolId,
+          name: cleanName,
+          level: clsLevel || cleanName,
+          cycle: clsCycle,
+          series: clsSeries,
+          motif: clsMotif,
+          accentColor: clsAccent,
+          room: clsRoom,
+          headTeacher: clsHeadTeacher,
+          headTeacherEmail: clsHeadTeacherEmail,
+          slogan: clsSlogan,
+          closingDate: clsClosingDate,
+          memberEmails: schoolMemberEmails,
+        };
+        setOptimisticAdded((prev) => [...prev, newCls]);
+        setActionFeedback(
+          `Classe « ${cleanName} » ajoutée avec ses ${fixedSubjectsPreview.length} matières et coefficients standards (fixes).`
+        );
       }
       setShowAddModal(false);
     } catch (err: unknown) {
@@ -403,10 +490,10 @@ export function MakeListView({
             <button
               type="button"
               onClick={openAddModal}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white hover:bg-violet-100 text-violet-950 text-xs font-bold transition-colors whitespace-nowrap shrink-0 shadow-xs"
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white hover:bg-violet-100 text-violet-950 text-xs font-bold transition-colors whitespace-nowrap shrink-0 shadow-xs"
             >
               <Plus className="w-4 h-4 text-violet-700" />
-              Ajouter une classe / division
+              Ajouter une classe
             </button>
           )}
         </div>
@@ -437,18 +524,45 @@ export function MakeListView({
               </div>
 
               <div className="p-4 space-y-3 flex-1">
-                {items.map((cl) => {
+                {items.length === 0 ? (
+                  <div className="py-8 px-4 text-center rounded-xl border border-dashed border-violet-300/70 bg-white/60 text-xs text-zinc-600 space-y-2">
+                    <p className="font-semibold">Aucune classe configurée pour le cycle {col.cycle}.</p>
+                    {canManageClasses && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          openAddModal();
+                          setClsCycle(col.cycle);
+                          setClsLevel(LEVEL_SUGGESTIONS[col.cycle][0]);
+                          setClsName(col.cycle === 'Lycée' ? '2nde A' : '6e A');
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-700 hover:bg-violet-800 text-white text-xs font-bold"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Ajouter une classe ({col.cycle})
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                items.map((cl) => {
                   const st = classStats[cl.name] ?? { total: 0, boys: 0, girls: 0, avg: null };
                   const theme = getClassroomTheme(cl.name, cl);
+                  const handleCardOpen = () => {
+                    if (canOpenClassDetail) {
+                      onSelectClass(cl.name);
+                    } else {
+                      setInspectingClass(cl);
+                    }
+                  };
 
                   return (
                     <div
                       key={cl.id}
-                      onClick={() => onSelectClass(cl.name)}
+                      onClick={handleCardOpen}
                       role="button"
                       tabIndex={0}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') onSelectClass(cl.name);
+                        if (e.key === 'Enter' || e.key === ' ') handleCardOpen();
                       }}
                       className={`w-full group rounded-xl border overflow-hidden transition-all cursor-pointer text-left shadow-xs ${theme.surfaceTintClass}`}
                     >
@@ -523,7 +637,8 @@ export function MakeListView({
                               <button
                                 type="button"
                                 onClick={(e) => openEditModal(e, cl)}
-                                title="Personnaliser cette classe"
+                                title={`Personnaliser ${cl.name}`}
+                                aria-label={`Personnaliser la classe ${cl.name}`}
                                 className="p-1.5 rounded-lg text-zinc-500 hover:text-violet-800 hover:bg-white/80 transition-colors"
                               >
                                 <SlidersHorizontal className="w-3.5 h-3.5" />
@@ -532,10 +647,12 @@ export function MakeListView({
                                 <button
                                   type="button"
                                   onClick={(e) => openDeleteClassModal(e, cl)}
-                                  title="Supprimer cette classe"
-                                  className="p-1.5 rounded-lg text-zinc-500 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                                  title="Supprimer la classe"
+                                  aria-label={`Supprimer la classe ${cl.name}`}
+                                  className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-rose-600 hover:text-rose-700 hover:bg-rose-50 transition-colors text-[11px] font-semibold"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
+                                  <span className="hidden sm:inline">Supprimer</span>
                                 </button>
                               )}
                             </>
@@ -545,7 +662,7 @@ export function MakeListView({
                       </div>
                     </div>
                   );
-                })}
+                }))}
               </div>
             </motion.div>
           );
@@ -556,236 +673,355 @@ export function MakeListView({
       {showAddModal &&
         typeof document !== 'undefined' &&
         createPortal(
-          <div className="fixed inset-0 z-50 bg-zinc-900/45 backdrop-blur-[1px] flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-            <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90dvh] overflow-y-auto p-5 sm:p-6 border border-zinc-200 shadow-xl space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-bold text-zinc-900">
-                  {editingClass ? `Personnaliser ${editingClass.name}` : 'Créer une nouvelle classe / division'}
-                </h3>
-                <p className="text-xs text-zinc-500">
-                  Ex : 6ème C, 5ème C, 3ème C ou une classe de Lycée avec série et thème dédié.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowAddModal(false)}
-                className="p-1.5 rounded-lg text-zinc-500 hover:bg-zinc-100"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveClassroom} className="space-y-4">
-              {saveError && (
-                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700">
-                  {saveError}
-                </div>
-              )}
-              <div className="grid grid-cols-2 gap-3">
+          <div
+            className="fixed inset-0 z-50 bg-zinc-950/55 backdrop-blur-[2px] flex items-center justify-center p-4 overflow-y-auto"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-classroom-modal-title"
+          >
+            <div className="my-auto bg-white rounded-2xl max-w-lg w-full max-h-[calc(100dvh-2rem)] overflow-y-auto p-5 sm:p-6 border border-zinc-200 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">Cycle *</label>
-                  <select
-                    value={clsCycle}
-                    onChange={(e) => {
-                      const cyc = e.target.value as CycleType;
-                      setClsCycle(cyc);
-                      setClsLevel(LEVEL_SUGGESTIONS[cyc][0]);
-                    }}
-                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-medium outline-none focus:border-violet-600"
-                  >
-                    <option value="Collège">Collège</option>
-                    <option value="Lycée">Lycée</option>
-                  </select>
+                  <h3 id="add-classroom-modal-title" className="text-base font-bold text-zinc-900">
+                    {editingClass ? `Personnaliser ${editingClass.name}` : 'Ajouter une classe'}
+                  </h3>
+                  <p className="text-xs text-zinc-500">
+                    Créez plusieurs classes (6e A, 6e B, 5e, 4e, 3e, 2nde A, 1re D, Tle C...). Les matières et coefficients standards sont appliqués automatiquement.
+                  </p>
                 </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">Niveau de base *</label>
-                  <select
-                    value={clsLevel}
-                    onChange={(e) => setClsLevel(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-medium outline-none focus:border-violet-600"
-                  >
-                    {LEVEL_SUGGESTIONS[clsCycle].map((lvl) => (
-                      <option key={lvl} value={lvl}>
-                        {lvl}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">
-                    Nom complet / Division *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={clsName}
-                    onChange={(e) => setClsName(e.target.value)}
-                    placeholder="Ex : 6ème C ou Tle C"
-                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">Série / Spécialité</label>
-                  <input
-                    type="text"
-                    value={clsSeries}
-                    onChange={(e) => setClsSeries(e.target.value)}
-                    placeholder="Ex : Série C · Maths & Physique"
-                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">
-                    Thème & symboles flottants
-                  </label>
-                  <select
-                    value={clsMotif}
-                    onChange={(e) => setClsMotif(e.target.value as ClassroomMotif)}
-                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
-                  >
-                    <option value="general">Général (∑, π, √x)</option>
-                    <option value="maths-physique">Maths & Physique (∫, E=mc², Δ, Ω)</option>
-                    <option value="sciences-nat">Sciences & SVT (ADN, O₂, ATP)</option>
-                    <option value="lettres-philo">Lettres & Philo (Φ, Ψ, Logos)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">Couleur de la classe</label>
-                  <select
-                    value={clsAccent}
-                    onChange={(e) => setClsAccent(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
-                  >
-                    {ACCENT_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">Salle</label>
-                  <input
-                    type="text"
-                    value={clsRoom}
-                    onChange={(e) => setClsRoom(e.target.value)}
-                    placeholder="Ex : Bâtiment B · S12"
-                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">
-                    Titulaire de la classe (Prof. Principal)
-                  </label>
-                  <select
-                    value={
-                      titulaireMode === 'none'
-                        ? '__none__'
-                        : titulaireMode === 'manual'
-                        ? '__manual__'
-                        : clsHeadTeacherEmail || '__manual__'
-                    }
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (val === '__none__') {
-                        setTitulaireMode('none');
-                        setClsHeadTeacher('');
-                        setClsHeadTeacherEmail('');
-                      } else if (val === '__manual__') {
-                        setTitulaireMode('manual');
-                        setClsHeadTeacherEmail('');
-                      } else {
-                        const found = teacherMemberships.find((t) => t.memberEmail === val);
-                        if (found) {
-                          setTitulaireMode('teacher');
-                          setClsHeadTeacher(found.memberName);
-                          setClsHeadTeacherEmail(found.memberEmail);
-                        }
-                      }
-                    }}
-                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600 bg-white"
-                  >
-                    <option value="__none__">— Aucun titulaire assigné —</option>
-                    {teacherMemberships.map((t) => (
-                      <option key={t.id} value={t.memberEmail}>
-                        {t.memberName} {t.assignedSubject ? `(${t.assignedSubject})` : ''}
-                      </option>
-                    ))}
-                    <option value="__manual__">Autre / Saisie libre...</option>
-                  </select>
-                  {titulaireMode === 'manual' && (
-                    <input
-                      type="text"
-                      value={clsHeadTeacher}
-                      onChange={(e) => setClsHeadTeacher(e.target.value)}
-                      placeholder="Nom du titulaire (Ex : M. Houngbédji)"
-                      className="mt-2 w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
-                    />
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">
-                    Devise / Slogan de la classe
-                  </label>
-                  <input
-                    type="text"
-                    value={clsSlogan}
-                    onChange={(e) => setClsSlogan(e.target.value)}
-                    placeholder="Ex : Objectif 100% au Baccalauréat"
-                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">
-                    Fin d’année classe (optionnel)
-                  </label>
-                  <input
-                    type="date"
-                    value={clsClosingDate}
-                    onChange={(e) => setClsClosingDate(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-mono-nums outline-none focus:border-violet-600"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 rounded-xl border border-zinc-200 text-xs font-semibold text-zinc-600 hover:bg-zinc-50"
+                  aria-label="Fermer"
+                  className="p-1.5 rounded-lg text-zinc-500 hover:bg-zinc-100 shrink-0"
                 >
-                  Annuler
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="px-5 py-2 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-xs font-semibold disabled:opacity-60"
-                >
-                  {saving ? 'Enregistrement...' : editingClass ? 'Mettre à jour' : 'Créer la classe'}
+                  <X className="w-4 h-4" />
                 </button>
               </div>
-            </form>
-          </div>
-        </div>,
-        document.body
-      )}
+
+              <form onSubmit={handleSaveClassroom} className="space-y-4">
+                {saveError && (
+                  <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700">
+                    {saveError}
+                  </div>
+                )}
+
+                {!editingClass && (
+                  <div className="space-y-1.5">
+                    <p className="text-[11px] font-bold text-zinc-600 uppercase tracking-wide">
+                      Modèles rapides
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {STANDARD_CLASS_PRESETS.map((preset) => {
+                        const alreadyExists = effectiveClassrooms.some(
+                          (c) => c.name.trim().toLowerCase() === preset.name.toLowerCase()
+                        );
+                        const isSelected = clsName.trim().toLowerCase() === preset.name.toLowerCase();
+                        return (
+                          <button
+                            key={preset.name}
+                            type="button"
+                            onClick={() => applyClassPreset(preset)}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors ${
+                              isSelected
+                                ? 'bg-violet-700 border-violet-700 text-white'
+                                : alreadyExists
+                                ? 'bg-zinc-50 border-zinc-200 text-zinc-400 hover:text-zinc-700'
+                                : 'bg-violet-50/70 border-violet-200 text-violet-800 hover:bg-violet-100'
+                            }`}
+                          >
+                            {preset.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-700 mb-1">Cycle *</label>
+                    <select
+                      value={clsCycle}
+                      onChange={(e) => {
+                        const cyc = e.target.value as CycleType;
+                        setClsCycle(cyc);
+                        setClsLevel(LEVEL_SUGGESTIONS[cyc][0]);
+                      }}
+                      className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-medium outline-none focus:border-violet-600 bg-white"
+                    >
+                      <option value="Collège">Collège</option>
+                      <option value="Lycée">Lycée</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-700 mb-1">Niveau *</label>
+                    <select
+                      value={clsLevel}
+                      onChange={(e) => setClsLevel(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-medium outline-none focus:border-violet-600 bg-white"
+                    >
+                      {LEVEL_SUGGESTIONS[clsCycle].map((lvl) => (
+                        <option key={lvl} value={lvl}>
+                          {lvl}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                      Nom de la classe *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={clsName}
+                      onChange={(e) => setClsName(e.target.value)}
+                      placeholder="Ex : 6e A, 5e, 2nde A, 1re D, Tle C"
+                      className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-700 mb-1">Série / Section</label>
+                    <input
+                      type="text"
+                      value={clsSeries}
+                      onChange={(e) => setClsSeries(e.target.value)}
+                      placeholder="Ex : Série C · Maths & Physique"
+                      className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
+                    />
+                  </div>
+                </div>
+
+                {/* Fixed Standard Subjects & Coefficients Preview (Non-Editable) */}
+                <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3.5 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-violet-950">
+                      <Lock className="w-3.5 h-3.5 text-violet-700 shrink-0" />
+                      Matières & coefficients standards (fixes)
+                    </span>
+                    <span className="text-[11px] font-semibold text-violet-700">
+                      {fixedSubjectsPreview.length} matières
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {fixedSubjectsPreview.map((item) => (
+                      <span
+                        key={item.name}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white border border-violet-200/80 text-[11px] font-semibold text-zinc-800"
+                      >
+                        <span>{item.name}</span>
+                        <span className="text-violet-700 font-mono-nums font-bold">×{item.coef}</span>
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-violet-800/85">
+                    Les coefficients sont appliqués automatiquement selon le niveau et la série (non modifiables).
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-700 mb-1">Salle (optionnel)</label>
+                    <input
+                      type="text"
+                      value={clsRoom}
+                      onChange={(e) => setClsRoom(e.target.value)}
+                      placeholder="Ex : Bâtiment B · S12"
+                      className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                      Titulaire (optionnel)
+                    </label>
+                    <select
+                      value={
+                        titulaireMode === 'none'
+                          ? '__none__'
+                          : titulaireMode === 'manual'
+                          ? '__manual__'
+                          : clsHeadTeacherEmail || '__manual__'
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === '__none__') {
+                          setTitulaireMode('none');
+                          setClsHeadTeacher('');
+                          setClsHeadTeacherEmail('');
+                        } else if (val === '__manual__') {
+                          setTitulaireMode('manual');
+                          setClsHeadTeacherEmail('');
+                        } else {
+                          const found = teacherMemberships.find((t) => t.memberEmail === val);
+                          if (found) {
+                            setTitulaireMode('teacher');
+                            setClsHeadTeacher(found.memberName);
+                            setClsHeadTeacherEmail(found.memberEmail);
+                          }
+                        }
+                      }}
+                      className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600 bg-white"
+                    >
+                      <option value="__none__">— Aucun titulaire assigné —</option>
+                      {teacherMemberships.map((t) => (
+                        <option key={t.id} value={t.memberEmail}>
+                          {t.memberName} {t.assignedSubject ? `(${t.assignedSubject})` : ''}
+                        </option>
+                      ))}
+                      <option value="__manual__">Autre / Saisie libre...</option>
+                    </select>
+                    {titulaireMode === 'manual' && (
+                      <input
+                        type="text"
+                        value={clsHeadTeacher}
+                        onChange={(e) => setClsHeadTeacher(e.target.value)}
+                        placeholder="Nom du titulaire (Ex : M. Houngbédji)"
+                        className="mt-2 w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {editingClass && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                        Thème & symboles
+                      </label>
+                      <select
+                        value={clsMotif}
+                        onChange={(e) => setClsMotif(e.target.value as ClassroomMotif)}
+                        className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
+                      >
+                        <option value="general">Général (∑, π, √x)</option>
+                        <option value="maths-physique">Maths & Physique (∫, E=mc², Δ, Ω)</option>
+                        <option value="sciences-nat">Sciences & SVT (ADN, O₂, ATP)</option>
+                        <option value="lettres-philo">Lettres & Philo (Φ, Ψ, Logos)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-700 mb-1">Couleur de la classe</label>
+                      <select
+                        value={clsAccent}
+                        onChange={(e) => setClsAccent(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
+                      >
+                        {ACCENT_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddModal(false)}
+                    className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-zinc-200 text-xs font-semibold text-zinc-600 hover:bg-zinc-50"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-xs font-bold disabled:opacity-60"
+                  >
+                    {saving ? 'Enregistrement...' : editingClass ? 'Mettre à jour' : 'Créer la classe'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* Read-only Classroom Preview Modal (e.g., for Directeur who doesn't access Censeur's grade panel) */}
+      {inspectingClass &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 bg-zinc-950/55 backdrop-blur-[2px] flex items-center justify-center p-4 overflow-y-auto"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="my-auto bg-white rounded-2xl max-w-md w-full max-h-[calc(100dvh-2rem)] overflow-y-auto p-5 sm:p-6 border border-zinc-200 shadow-2xl space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-extrabold text-zinc-900">
+                    Classe {inspectingClass.name} ({inspectingClass.cycle})
+                  </h3>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    {inspectingClass.series || 'Programme officiel'}
+                    {inspectingClass.room ? ` · Salle ${inspectingClass.room}` : ''}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setInspectingClass(null)}
+                  aria-label="Fermer"
+                  className="p-1.5 rounded-lg text-zinc-500 hover:bg-zinc-100"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3.5 space-y-2">
+                <p className="inline-flex items-center gap-1.5 text-xs font-bold text-violet-950">
+                  <Lock className="w-3.5 h-3.5 text-violet-700" />
+                  Matières & coefficients standards (fixes)
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {inspectingSubjectsPreview.map((item) => (
+                    <span
+                      key={item.name}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white border border-violet-200/80 text-[11px] font-semibold text-zinc-800"
+                    >
+                      <span>{item.name}</span>
+                      <span className="text-violet-700 font-mono-nums font-bold">×{item.coef}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 pt-1">
+                {canManageClasses && !inspectingClass.id.startsWith('fallback_') ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      const cls = inspectingClass;
+                      setInspectingClass(null);
+                      openDeleteClassModal(e, cls);
+                    }}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Supprimer la classe
+                  </button>
+                ) : (
+                  <span />
+                )}
+                <button
+                  type="button"
+                  onClick={() => setInspectingClass(null)}
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-zinc-200 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                >
+                  Fermer
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
 
       <ConfirmModal
         open={Boolean(pendingDeleteClass)}
