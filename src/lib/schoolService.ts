@@ -3428,17 +3428,29 @@ export async function sendMessage(
   }
 ): Promise<void> {
   const msgId = sanitizeId(`msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
+  const cleanSenderEmail = normalizeEmail(payload.senderEmail);
+  const cleanRecipientEmail = normalizeEmail(payload.recipientEmail);
+  const safeSenderName = (
+    payload.senderName.trim() ||
+    formatAuthIdentifierForDisplay(cleanSenderEmail).split('@')[0] ||
+    'Utilisateur'
+  ).slice(0, 100);
+  const safeRecipientName = (
+    payload.recipientName.trim() ||
+    formatAuthIdentifierForDisplay(cleanRecipientEmail).split('@')[0] ||
+    'Destinataire'
+  ).slice(0, 100);
   try {
     await awaitWithOfflineQueue(
       setDoc(doc(db, 'messages', msgId), {
         ownerId: ownerUid,
         schoolId,
         senderUid: payload.senderUid,
-        senderEmail: normalizeEmail(payload.senderEmail),
-        senderName: payload.senderName.trim().slice(0, 100),
+        senderEmail: cleanSenderEmail,
+        senderName: safeSenderName,
         senderRole: payload.senderRole,
-        recipientEmail: normalizeEmail(payload.recipientEmail),
-        recipientName: payload.recipientName.trim().slice(0, 100),
+        recipientEmail: cleanRecipientEmail,
+        recipientName: safeRecipientName,
         studentId: (payload.studentId ?? '').slice(0, 128),
         studentName: (payload.studentName ?? '').slice(0, 120),
         classe: (payload.classe ?? '').slice(0, 40),
@@ -3494,6 +3506,12 @@ export async function createNotification(
   const notifId = sanitizeId(`notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
   const createdByRole: UserRole =
     payload.createdByRole ?? activeAuditContext?.actorRole ?? 'admin';
+  const cleanCreatorEmail = normalizeEmail(payload.createdByEmail);
+  const safeCreatorName = (
+    payload.createdByName.trim() ||
+    formatAuthIdentifierForDisplay(cleanCreatorEmail).split('@')[0] ||
+    'Utilisateur'
+  ).slice(0, 100);
   try {
     await awaitWithOfflineQueue(
       setDoc(doc(db, 'notifications', notifId), {
@@ -3507,8 +3525,8 @@ export async function createNotification(
         audienceEmails: Array.from(new Set(payload.audienceEmails.map((e) => normalizeEmail(e)).filter(Boolean))).slice(0, 100),
         dismissedByEmails: [],
         managementEmails: getSchoolCenseurEmails(schoolId),
-        createdByEmail: normalizeEmail(payload.createdByEmail),
-        createdByName: payload.createdByName.trim().slice(0, 100),
+        createdByEmail: cleanCreatorEmail,
+        createdByName: safeCreatorName,
         createdByRole,
         read: false,
         expiresAt: payload.expiresAt ? Timestamp.fromDate(payload.expiresAt) : null,

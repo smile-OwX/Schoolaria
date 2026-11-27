@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import {
   buildApiUrlFromBase,
   isAllowedCorsOrigin,
+  isSameHostOrigin,
   normalizeBaseUrl,
   requiresExternalApiUrlForTarget,
   resolveApiBaseUrl,
@@ -75,7 +77,7 @@ test('buildApiUrlFromBase formats full and relative API paths cleanly', () => {
   assert.equal(buildApiUrlFromBase('/api/health', ''), '/api/health');
 });
 
-test('isAllowedCorsOrigin allows Vercel, Capacitor, Electron, localhost, and blocks unknown origins', () => {
+test('isAllowedCorsOrigin allows Vercel, Capacitor, Electron, localhost, same-host custom domains, and blocks unknown origins', () => {
   assert.equal(isAllowedCorsOrigin('https://schoolaria-ecole.vercel.app'), true);
   assert.equal(isAllowedCorsOrigin('capacitor://localhost'), true);
   assert.equal(isAllowedCorsOrigin('http://localhost:45821'), true);
@@ -85,6 +87,12 @@ test('isAllowedCorsOrigin allows Vercel, Capacitor, Electron, localhost, and blo
     }),
     true
   );
+  assert.equal(isSameHostOrigin('https://ecole.mon-domaine.tg', 'ecole.mon-domaine.tg'), true);
+  assert.equal(
+    isAllowedCorsOrigin('https://ecole.mon-domaine.tg', {}, 'ecole.mon-domaine.tg'),
+    true
+  );
+  assert.equal(isAllowedCorsOrigin('https://evil-site.example.com', {}, 'ecole.mon-domaine.tg'), false);
   assert.equal(isAllowedCorsOrigin('https://evil-site.example.com'), false);
 });
 
@@ -313,4 +321,40 @@ test('parseTogoClassProfile and buildFixedSubjectsPreviewForClass apply fixed of
   const tleAMap = Object.fromEntries(tleASubjects.map((s) => [s.name, s.coef]));
   assert.equal(tleAMap['Philosophie'], 4);
   assert.equal(tleAMap['Français'], 3);
+});
+
+test('Vercel API catch-all handler disables bodyParser and awaits Express response completion', async () => {
+  process.env.SCHOOLARIA_NO_LISTEN = '1';
+  const mod = await import('../../api/[...route].ts');
+  assert.equal(mod.config?.api?.bodyParser, false);
+
+  const req = new EventEmitter() as unknown as Record<string, unknown>;
+  req.method = 'GET';
+  req.url = '/api/health';
+  req.headers = { host: 'mon-ecole.vercel.app' };
+  req.socket = {};
+
+  const headers: Record<string, string> = {};
+  let body = '';
+  const res = new EventEmitter() as unknown as Record<string, unknown>;
+  res.statusCode = 200;
+  res.setHeader = (k: string, v: string) => {
+    headers[k.toLowerCase()] = String(v);
+  };
+  res.getHeader = (k: string) => headers[k.toLowerCase()];
+  res.writeHead = (code: number) => {
+    res.statusCode = code;
+    return res;
+  };
+  res.end = (chunk?: string | Buffer) => {
+    if (chunk) body += chunk.toString();
+    (res as unknown as EventEmitter).emit('finish');
+    return res;
+  };
+
+  await mod.default(req as never, res as never);
+  assert.equal(res.statusCode, 200);
+  const parsed = JSON.parse(body) as { ok?: boolean; firebaseConfigured?: boolean };
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.firebaseConfigured, true);
 });

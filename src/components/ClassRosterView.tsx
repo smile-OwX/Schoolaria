@@ -47,6 +47,7 @@ import {
   createSubject,
   deleteClassroomCascade,
   deleteSubjectById,
+  normalizeEmail,
   updateClassroomTitulaire,
   upsertGrade,
 } from '../lib/schoolService.ts';
@@ -347,11 +348,16 @@ export function ClassRosterView({
 
       if (actorRole === 'teacher') {
         // Les professeurs n'envoient rien aux parents : signalement uniquement au Censeur et au Directeur
+        const censeursFromMems = memberships
+          .filter((m) => m.role === 'censeur')
+          .map((m) => normalizeEmail(m.memberEmail));
+        const directorEmail = normalizeEmail(school.ownerEmail || school.email || '');
         audience = Array.from(
           new Set(
             [
-              ...(school.censeurEmails ?? []),
-              ...(school.ownerEmail ? [school.ownerEmail] : []),
+              ...(school.censeurEmails ?? []).map((e) => normalizeEmail(e)),
+              ...censeursFromMems,
+              directorEmail,
             ].filter(Boolean)
           )
         );
@@ -733,9 +739,13 @@ export function ClassRosterView({
 
   return (
     <div className="space-y-5">
-      {/* Personalized Classroom Banner (especially distinct for Lycée classes) */}
+      {/* Personalized Classroom Banner */}
       <div
-        className={`no-print relative overflow-hidden rounded-2xl bg-gradient-to-r ${theme.gradientClass} text-white p-5 sm:p-6 shadow-sm`}
+        className={`no-print relative overflow-hidden rounded-2xl p-5 sm:p-6 shadow-sm border ${
+          theme.usesSchoolTheme
+            ? 'theme-surface-header'
+            : `bg-gradient-to-r ${theme.gradientClass} text-white border-transparent`
+        }`}
       >
         <div
           aria-hidden="true"
@@ -751,7 +761,11 @@ export function ClassRosterView({
             <button
               type="button"
               onClick={onBack}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-xs font-semibold text-white transition-colors shrink-0"
+              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors shrink-0 ${
+                theme.usesSchoolTheme
+                  ? 'theme-header-chip border'
+                  : 'bg-white/15 hover:bg-white/25 text-white'
+              }`}
             >
               <ArrowLeft className="w-4 h-4" />
               Classes
@@ -759,18 +773,30 @@ export function ClassRosterView({
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight">{classe}</h1>
-                <span className="inline-flex items-center gap-1 text-xs font-semibold text-white/90 bg-white/15 px-2.5 py-0.5 rounded-lg">
+                <span
+                  className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-0.5 rounded-lg ${
+                    theme.usesSchoolTheme
+                      ? 'theme-header-chip border'
+                      : 'text-white/90 bg-white/15'
+                  }`}
+                >
                   <Sparkles className="w-3 h-3" />
                   {theme.badgeLabel}
                 </span>
               </div>
-              <p className="text-xs text-white/85 mt-1">
+              <p className={`text-xs mt-1 ${theme.usesSchoolTheme ? 'theme-header-subtext' : 'text-white/85'}`}>
                 {theme.series ? `${theme.series} · ` : `${cycle} · `}
                 {theme.slogan}
                 {classroom?.room ? ` · Salle ${classroom.room}` : ''}
               </p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/15 border border-white/20 text-xs font-semibold text-white">
+                <span
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold ${
+                    theme.usesSchoolTheme
+                      ? 'theme-header-chip'
+                      : 'bg-white/15 border-white/20 text-white'
+                  }`}
+                >
                   <UserCheck className="w-3.5 h-3.5" />
                   Titulaire : {classroom?.headTeacher ? classroom.headTeacher : 'Non assigné'}
                 </span>
@@ -778,7 +804,11 @@ export function ClassRosterView({
                   <button
                     type="button"
                     onClick={openTitulaireModal}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white text-violet-950 hover:bg-violet-100 text-[11px] font-bold transition-colors shadow-xs"
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors shadow-xs ${
+                      theme.usesSchoolTheme
+                        ? 'theme-nav-active'
+                        : 'bg-white text-zinc-900 hover:bg-zinc-100'
+                    }`}
                   >
                     <Pencil className="w-3 h-3" />
                     {classroom?.headTeacher ? 'Changer' : 'Désigner le titulaire'}
@@ -803,7 +833,11 @@ export function ClassRosterView({
             <button
               type="button"
               onClick={() => window.print()}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-xs font-semibold text-white transition-colors whitespace-nowrap"
+              className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap ${
+                theme.usesSchoolTheme
+                  ? 'theme-header-chip border'
+                  : 'bg-white/15 hover:bg-white/25 text-white'
+              }`}
             >
               <Printer className="w-3.5 h-3.5" />
               Imprimer PDF
@@ -813,7 +847,11 @@ export function ClassRosterView({
               type="button"
               onClick={() => setMenuOpen((o) => !o)}
               aria-label="Menu options classe"
-              className="p-2 rounded-xl bg-white/15 hover:bg-white/25 text-white transition-colors"
+              className={`p-2 rounded-xl transition-colors ${
+                theme.usesSchoolTheme
+                  ? 'theme-header-chip border'
+                  : 'bg-white/15 hover:bg-white/25 text-white'
+              }`}
             >
               <MoreHorizontal className="w-4 h-4" />
             </button>
@@ -833,26 +871,26 @@ export function ClassRosterView({
                     setSortMode(sortMode === 'alpha' ? 'rank' : 'alpha');
                     setMenuOpen(false);
                   }}
-                  className="w-full px-4 py-2.5 text-left hover:bg-violet-50 flex items-center gap-2.5 text-zinc-700 font-medium"
+                  className="w-full px-4 py-2.5 text-left theme-bg-soft-hover flex items-center gap-2.5 text-zinc-700 font-medium"
                 >
-                  <ArrowUpDown className="w-3.5 h-3.5 text-violet-600" />
+                  <ArrowUpDown className="w-3.5 h-3.5 theme-text-accent" />
                   {sortMode === 'alpha' ? 'Trier par Moyenne / Rang' : 'Trier par Nom (A-Z)'}
                 </button>
                 <button
                   type="button"
                   onClick={handleExportCsv}
-                  className="w-full px-4 py-2.5 text-left hover:bg-violet-50 flex items-center gap-2.5 text-zinc-700 font-medium"
+                  className="w-full px-4 py-2.5 text-left theme-bg-soft-hover flex items-center gap-2.5 text-zinc-700 font-medium"
                 >
-                  <Download className="w-3.5 h-3.5 text-violet-600" />
+                  <Download className="w-3.5 h-3.5 theme-text-accent" />
                   Exporter liste (CSV / Excel)
                 </button>
                 {allowTitulaireEdit && (
                   <button
                     type="button"
                     onClick={openTitulaireModal}
-                    className="w-full px-4 py-2.5 text-left hover:bg-violet-50 flex items-center gap-2.5 text-zinc-700 font-medium"
+                    className="w-full px-4 py-2.5 text-left theme-bg-soft-hover flex items-center gap-2.5 text-zinc-700 font-medium"
                   >
-                    <UserCheck className="w-3.5 h-3.5 text-violet-600" />
+                    <UserCheck className="w-3.5 h-3.5 theme-text-accent" />
                     Désigner le Titulaire de classe
                   </button>
                 )}
@@ -863,9 +901,9 @@ export function ClassRosterView({
                       setShowSubjectsModal(true);
                       setMenuOpen(false);
                     }}
-                    className="w-full px-4 py-2.5 text-left hover:bg-violet-50 flex items-center gap-2.5 text-zinc-700 font-medium"
+                    className="w-full px-4 py-2.5 text-left theme-bg-soft-hover flex items-center gap-2.5 text-zinc-700 font-medium"
                   >
-                    <BookOpen className="w-3.5 h-3.5 text-violet-600" />
+                    <BookOpen className="w-3.5 h-3.5 theme-text-accent" />
                     Gérer les matières ({cycle})
                   </button>
                 )}
@@ -876,9 +914,9 @@ export function ClassRosterView({
                       setShowScannerModal(true);
                       setMenuOpen(false);
                     }}
-                    className="w-full px-4 py-2.5 text-left hover:bg-violet-50 flex items-center gap-2.5 text-zinc-700 font-medium"
+                    className="w-full px-4 py-2.5 text-left theme-bg-soft-hover flex items-center gap-2.5 text-zinc-700 font-medium"
                   >
-                    <Camera className="w-3.5 h-3.5 text-violet-600" />
+                    <Camera className="w-3.5 h-3.5 theme-text-accent" />
                     Numériser fiche papier (IA)
                   </button>
                 )}
@@ -911,7 +949,7 @@ export function ClassRosterView({
                   type="button"
                   onClick={() => setTrimester(t)}
                   className={`relative px-3.5 py-1.5 rounded-full text-xs font-semibold transition-colors whitespace-nowrap ${
-                    active ? 'text-violet-800' : 'text-zinc-600 hover:text-zinc-900'
+                    active ? 'theme-text-accent' : 'text-zinc-600 hover:text-zinc-900'
                   }`}
                 >
                   {active && (
@@ -932,7 +970,7 @@ export function ClassRosterView({
             <select
               value={activeSubject?.id ?? ''}
               onChange={(e) => setSelectedSubjectId(e.target.value)}
-              className="px-3 py-1.5 rounded-xl border border-zinc-200 bg-white text-xs font-semibold text-zinc-800 focus:border-violet-600 outline-none"
+              className="px-3 py-1.5 rounded-xl border border-zinc-200 bg-white text-xs font-semibold text-zinc-800 theme-input outline-none"
             >
               {cycleSubjects.map((sub) => (
                 <option key={sub.id} value={sub.id}>
@@ -950,7 +988,7 @@ export function ClassRosterView({
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Filtrer dans la classe..."
-            className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-zinc-200 text-xs focus:border-violet-600 outline-none"
+            className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-zinc-200 text-xs theme-input outline-none"
           />
         </div>
       </div>
@@ -981,13 +1019,13 @@ export function ClassRosterView({
 
       {/* Printable Roster & Grade Sheet */}
       <div className="print-only-container bg-white/95 backdrop-blur-xs border border-zinc-200/90 rounded-2xl overflow-hidden">
-        <div className="p-5 border-b border-zinc-200 flex flex-wrap items-center justify-between gap-4 bg-[#FAF9FE]">
+        <div className="p-5 border-b theme-border-soft flex flex-wrap items-center justify-between gap-4 theme-bg-soft">
           <div>
-            <p className="text-xs font-semibold text-violet-700">{school.schoolName} · {school.academicYear}</p>
+            <p className="text-xs font-semibold theme-text-accent">{school.schoolName} · {school.academicYear}</p>
             <h2 className="text-base font-bold text-zinc-900">
               Liste & Relevé de notes — Classe de {classe} · {getPeriodLabel(cycle, trimester)}
               {!canEditGrades && (
-                <span className="ml-2 text-xs font-semibold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-md">
+                <span className="ml-2 text-xs font-semibold theme-pill-soft border px-2 py-0.5 rounded-md">
                   Lecture seule notes
                 </span>
               )}
@@ -1019,9 +1057,9 @@ export function ClassRosterView({
                   <th className="py-3 px-2 text-center">Int. 1</th>
                   <th className="py-3 px-2 text-center">Int. 2</th>
                   <th className="py-3 px-2 text-center">Devoir</th>
-                  <th className="py-3 px-2 text-center bg-violet-50/50 text-violet-900">Moy. Cl.</th>
+                  <th className="py-3 px-2 text-center theme-bg-soft theme-text-ink">Moy. Cl.</th>
                   <th className="py-3 px-2 text-center">Compo</th>
-                  <th className="py-3 px-2 text-center bg-violet-50 text-violet-900">Moy. /20</th>
+                  <th className="py-3 px-2 text-center theme-table-head">Moy. /20</th>
                   <th className="py-3 px-3">Appréciation</th>
                   <th className="no-print py-3 px-3 text-right">Actions</th>
                 </tr>
@@ -1037,7 +1075,7 @@ export function ClassRosterView({
                   const isDirty = Boolean(drafts[student.id]);
 
                   return (
-                    <tr key={student.id} className="hover:bg-violet-50/25 transition-colors">
+                    <tr key={student.id} className="hover:bg-zinc-50/70 transition-colors">
                       <td className="py-2 px-3 text-center font-mono-nums text-zinc-400">{index + 1}</td>
                       <td className="py-2 px-3 font-bold text-zinc-900">{student.nom}</td>
                       <td className="py-2 px-3 text-zinc-700">{student.prenoms}</td>
@@ -1054,12 +1092,12 @@ export function ClassRosterView({
                             value={getFieldVal(student.id, field)}
                             onChange={(e) => handleDraftChange(student.id, field, e.target.value)}
                             placeholder="—"
-                            className="w-14 text-center py-1 px-1 rounded-lg border border-zinc-200 focus:border-violet-600 focus:bg-white bg-zinc-50/50 font-mono-nums outline-none disabled:opacity-75 disabled:cursor-not-allowed"
+                            className="w-14 text-center py-1 px-1 rounded-lg border border-zinc-200 theme-input focus:bg-white bg-zinc-50/50 font-mono-nums outline-none disabled:opacity-75 disabled:cursor-not-allowed"
                           />
                         </td>
                       ))}
 
-                      <td className="py-2 px-2 text-center font-mono-nums font-semibold text-violet-800 bg-violet-50/30">
+                      <td className="py-2 px-2 text-center font-mono-nums font-semibold theme-text-accent theme-bg-soft">
                         {moyCl !== null ? moyCl.toFixed(2) : '—'}
                       </td>
 
@@ -1073,12 +1111,12 @@ export function ClassRosterView({
                           value={getFieldVal(student.id, 'compo')}
                           onChange={(e) => handleDraftChange(student.id, 'compo', e.target.value)}
                           placeholder="—"
-                          className="w-14 text-center py-1 px-1 rounded-lg border border-zinc-200 focus:border-violet-600 focus:bg-white bg-zinc-50/50 font-mono-nums outline-none disabled:opacity-75 disabled:cursor-not-allowed"
+                          className="w-14 text-center py-1 px-1 rounded-lg border border-zinc-200 theme-input focus:bg-white bg-zinc-50/50 font-mono-nums outline-none disabled:opacity-75 disabled:cursor-not-allowed"
                         />
                       </td>
 
                       <td
-                        className={`py-2 px-2 text-center font-mono-nums font-bold bg-violet-50/50 ${
+                        className={`py-2 px-2 text-center font-mono-nums font-bold theme-bg-soft ${
                           moyMat === null
                             ? 'text-zinc-400'
                             : moyMat >= 10
@@ -1096,7 +1134,7 @@ export function ClassRosterView({
                           value={getFieldVal(student.id, 'appreciation')}
                           onChange={(e) => handleDraftChange(student.id, 'appreciation', e.target.value)}
                           placeholder={getAutoAppreciation(moyMat)}
-                          className="w-32 py-1 px-2 rounded-lg border border-transparent hover:border-zinc-200 focus:border-violet-600 bg-transparent focus:bg-white outline-none text-zinc-700 disabled:cursor-not-allowed"
+                          className="w-32 py-1 px-2 rounded-lg border border-transparent hover:border-zinc-200 theme-input bg-transparent focus:bg-white outline-none text-zinc-700 disabled:cursor-not-allowed"
                         />
                       </td>
 
@@ -1110,8 +1148,8 @@ export function ClassRosterView({
                               title="Enregistrer les notes"
                               className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
                                 isDirty
-                                  ? 'bg-violet-700 text-white hover:bg-violet-800'
-                                  : 'bg-zinc-100 text-zinc-600 hover:bg-violet-100 hover:text-violet-700'
+                                  ? 'theme-btn-primary'
+                                  : 'bg-zinc-100 text-zinc-600 theme-bg-soft-hover theme-text-accent-hover'
                               }`}
                             >
                               {savingStudentId === student.id ? '...' : 'Sauver'}
@@ -1139,7 +1177,7 @@ export function ClassRosterView({
                             type="button"
                             onClick={() => onOpenBulletin(student.id, trimester)}
                             title="Voir le bulletin"
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-violet-50 text-violet-700 hover:bg-violet-100 text-[11px] font-semibold transition-colors"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg theme-pill-soft border text-[11px] font-semibold transition-colors"
                           >
                             <FileText className="w-3 h-3" />
                             Bulletin
@@ -1166,7 +1204,7 @@ export function ClassRosterView({
                 <h3 className="text-base font-bold text-zinc-900">
                   Matières de {classe} ({cycle})
                 </h3>
-                <p className="text-[11px] text-violet-700 mt-0.5">
+                <p className="text-[11px] theme-text-accent mt-0.5">
                   Les coefficients officiels du Togo s'appliquent automatiquement selon la classe et la série.
                 </p>
               </div>
@@ -1186,7 +1224,7 @@ export function ClassRosterView({
                 value={newSubName}
                 onChange={(e) => setNewSubName(e.target.value)}
                 placeholder="Nom de la matière"
-                className="sm:col-span-6 px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
+                className="sm:col-span-6 px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none theme-input"
               />
               <input
                 type="number"
@@ -1195,18 +1233,18 @@ export function ClassRosterView({
                 value={newSubCoef}
                 onChange={(e) => setNewSubCoef(Number(e.target.value))}
                 placeholder="Coef"
-                className="sm:col-span-2 px-3 py-2 rounded-xl border border-zinc-200 text-xs font-mono-nums outline-none focus:border-violet-600"
+                className="sm:col-span-2 px-3 py-2 rounded-xl border border-zinc-200 text-xs font-mono-nums outline-none theme-input"
               />
               <input
                 type="text"
                 value={newSubTeacher}
                 onChange={(e) => setNewSubTeacher(e.target.value)}
                 placeholder="Professeur"
-                className="sm:col-span-4 px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
+                className="sm:col-span-4 px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none theme-input"
               />
               <button
                 type="submit"
-                className="sm:col-span-12 inline-flex items-center justify-center gap-1.5 py-2 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-xs font-semibold"
+                className="sm:col-span-12 inline-flex items-center justify-center gap-1.5 py-2 rounded-xl theme-btn-primary text-xs font-semibold"
               >
                 <Plus className="w-3.5 h-3.5" />
                 Ajouter la matière
@@ -1269,9 +1307,9 @@ export function ClassRosterView({
               </button>
             </div>
 
-            <label className="block border-2 border-dashed border-violet-200 hover:border-violet-400 rounded-xl p-6 text-center cursor-pointer bg-violet-50/30 transition-colors">
-              <Camera className="w-7 h-7 text-violet-600 mx-auto mb-2" />
-              <span className="text-xs font-semibold text-violet-800 block">
+            <label className="block border-2 border-dashed theme-border-soft theme-border-accent-hover rounded-xl p-6 text-center cursor-pointer theme-bg-soft transition-colors">
+              <Camera className="w-7 h-7 theme-text-accent mx-auto mb-2" />
+              <span className="text-xs font-semibold theme-text-ink block">
                 {scanning ? 'Analyse de l’image en cours...' : 'Choisir une photo (JPG / PNG)'}
               </span>
               <input
@@ -1308,7 +1346,7 @@ export function ClassRosterView({
                   type="button"
                   onClick={handleImportScannedStudents}
                   disabled={importingScan || scanResult.students.length === 0}
-                  className="w-full py-2.5 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-xs font-semibold disabled:opacity-60"
+                  className="w-full py-2.5 rounded-xl theme-btn-primary text-xs font-semibold disabled:opacity-60"
                 >
                   {importingScan
                     ? 'Importation dans la base...'
@@ -1376,7 +1414,7 @@ export function ClassRosterView({
                       }
                     }
                   }}
-                  className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600 bg-white"
+                  className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none theme-input bg-white"
                 >
                   <option value="__none__">— Aucun titulaire assigné —</option>
                   {teacherMemberships.map((t) => (
@@ -1399,7 +1437,7 @@ export function ClassRosterView({
                     value={titulaireName}
                     onChange={(e) => setTitulaireName(e.target.value)}
                     placeholder="Ex : Prof. Houngbédji"
-                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none theme-input"
                   />
                 </div>
               )}
@@ -1415,7 +1453,7 @@ export function ClassRosterView({
                 <button
                   type="submit"
                   disabled={savingTitulaire}
-                  className="px-5 py-2 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-xs font-semibold disabled:opacity-60"
+                  className="px-5 py-2 rounded-xl theme-btn-primary text-xs font-semibold disabled:opacity-60"
                 >
                   {savingTitulaire ? 'Enregistrement...' : 'Enregistrer le titulaire'}
                 </button>
@@ -1451,7 +1489,7 @@ export function ClassRosterView({
                     name="roster-class-delete-mode"
                     checked={deleteClassMode === 'transfer'}
                     onChange={() => setDeleteClassMode('transfer')}
-                    className="mt-0.5 text-violet-700"
+                    className="mt-0.5 accent-[var(--theme-accent)]"
                   />
                   <span className="font-semibold text-zinc-800">
                     Transférer les élèves vers une autre classe
@@ -1461,7 +1499,7 @@ export function ClassRosterView({
                   <select
                     value={transferTargetClass}
                     onChange={(e) => setTransferTargetClass(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-violet-200 bg-white text-xs font-bold text-violet-900 outline-none focus:border-violet-600"
+                    className="w-full px-3 py-2 rounded-lg border theme-border-soft bg-white text-xs font-bold theme-text-ink outline-none theme-input"
                   >
                     {otherClassrooms.map((c) => (
                       <option key={c.id} value={c.name}>

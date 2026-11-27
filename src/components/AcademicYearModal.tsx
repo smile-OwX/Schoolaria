@@ -266,18 +266,18 @@ export function AcademicYearModal({
 
   return createPortal(
     <div className="fixed inset-0 z-50 bg-zinc-950/60 backdrop-blur-[2px] flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
-      <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[92dvh] flex flex-col border border-violet-300 shadow-2xl overflow-hidden">
+      <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[92dvh] flex flex-col border theme-border-soft shadow-2xl overflow-hidden">
         {/* Header */}
-        <div className="bg-gradient-to-r from-violet-950 via-violet-800 to-indigo-900 text-white px-5 py-4 flex items-start justify-between gap-3 shrink-0">
+        <div className="theme-surface-header border-b px-5 py-4 flex items-start justify-between gap-3 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-white/15 border border-white/25 flex items-center justify-center shrink-0">
-              <CalendarClock className="w-5 h-5 text-white" />
+            <div className="w-10 h-10 rounded-xl theme-header-chip border flex items-center justify-center shrink-0">
+              <CalendarClock className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base sm:text-lg font-extrabold text-white">
+              <h2 className="text-base sm:text-lg font-extrabold">
                 Passer à une nouvelle année scolaire
               </h2>
-              <p className="text-xs text-violet-200">
+              <p className="text-xs theme-header-subtext">
                 Archivage complet de {school.academicYear}, promotion par niveau et réinitialisation propre des notes.
               </p>
             </div>
@@ -286,17 +286,17 @@ export function AcademicYearModal({
             type="button"
             disabled={submitting}
             onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-white/15 text-white transition-colors"
+            className="p-1.5 rounded-lg theme-header-chip transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Config + Stats */}
-        <div className="p-5 bg-violet-50/70 border-b border-violet-200 space-y-4 shrink-0">
+        <div className="p-5 theme-bg-soft border-b theme-border-soft space-y-4 shrink-0">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="block text-[11px] font-bold text-violet-950 mb-1">
+              <label className="block text-[11px] font-bold theme-text-ink mb-1">
                 Nouvelle année scolaire *
               </label>
               <input
@@ -304,26 +304,26 @@ export function AcademicYearModal({
                 value={newAcademicYear}
                 onChange={(e) => setNewAcademicYear(e.target.value)}
                 placeholder="2027-2028"
-                className="w-full px-3 py-2 rounded-xl border border-violet-200 bg-white text-xs font-bold font-mono-nums outline-none focus:border-violet-700"
+                className="w-full px-3 py-2 rounded-xl border theme-border-soft bg-white text-xs font-bold font-mono-nums outline-none theme-input"
               />
             </div>
             <div>
-              <label className="block text-[11px] font-bold text-violet-950 mb-1">
+              <label className="block text-[11px] font-bold theme-text-ink mb-1">
                 Date prévue de fin d’année
               </label>
               <input
                 type="date"
                 value={newEndOfYearDate}
                 onChange={(e) => setNewEndOfYearDate(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-violet-200 bg-white text-xs font-mono-nums outline-none focus:border-violet-700"
+                className="w-full px-3 py-2 rounded-xl border theme-border-soft bg-white text-xs font-mono-nums outline-none theme-input"
               />
             </div>
-            <label className="flex items-center gap-2.5 bg-white border border-violet-200 rounded-xl px-3 py-2 cursor-pointer">
+            <label className="flex items-center gap-2.5 bg-white border theme-border-soft rounded-xl px-3 py-2 cursor-pointer">
               <input
                 type="checkbox"
                 checked={resetGrades}
                 onChange={(e) => setResetGrades(e.target.checked)}
-                className="rounded border-violet-300 text-violet-700 focus:ring-violet-600"
+                className="rounded border-zinc-300 accent-[var(--theme-accent)]"
               />
               <span className="text-[11px] font-semibold text-zinc-700 leading-tight">
                 Archiver puis vider les notes actives de {school.academicYear}
@@ -339,7 +339,7 @@ export function AcademicYearModal({
               <span className="px-2.5 py-1 rounded-lg bg-amber-100 text-amber-800 font-bold">
                 Redoublants : {counts.repeat}
               </span>
-              <span className="px-2.5 py-1 rounded-lg bg-indigo-100 text-indigo-800 font-bold">
+              <span className="px-2.5 py-1 rounded-lg bg-sky-100 text-sky-800 font-bold">
                 Diplômés / Sortants (Tle) : {counts.graduate}
               </span>
               <span className="px-2.5 py-1 rounded-lg bg-rose-100 text-rose-800 font-bold">
@@ -353,7 +353,7 @@ export function AcademicYearModal({
                 value={searchFilter}
                 onChange={(e) => setSearchFilter(e.target.value)}
                 placeholder="Filtrer un élève ou classe..."
-                className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-violet-200 bg-white text-xs outline-none focus:border-violet-600"
+                className="w-full pl-8 pr-3 py-1.5 rounded-xl border theme-border-soft bg-white text-xs outline-none theme-input"
               />
             </div>
           </div>
@@ -379,14 +379,14 @@ export function AcademicYearModal({
                 </thead>
                 <tbody className="divide-y divide-zinc-100">
                   {visibleRows.map((row) => (
-                    <tr key={row.student.id} className="hover:bg-violet-50/30">
+                    <tr key={row.student.id} className="theme-bg-soft-hover">
                       <td className="py-2 px-3 font-semibold text-zinc-900">
                         {row.student.nom} {row.student.prenoms}
                         <span className="block text-[10px] font-mono-nums text-zinc-400">
                           {row.student.matricule}
                         </span>
                       </td>
-                      <td className="py-2 px-3 font-semibold text-violet-800">{row.student.classe}</td>
+                      <td className="py-2 px-3 font-semibold theme-text-accent">{row.student.classe}</td>
                       <td className="py-2 px-3 text-right font-mono-nums font-bold">
                         {row.annualAverage !== null ? (
                           <span className={row.annualAverage >= 10 ? 'text-emerald-700' : 'text-rose-600'}>
@@ -404,7 +404,7 @@ export function AcademicYearModal({
                               action: e.target.value as TransitionDecision,
                             })
                           }
-                          className="px-2.5 py-1.5 rounded-lg border border-zinc-200 bg-white text-xs font-semibold outline-none focus:border-violet-600"
+                          className="px-2.5 py-1.5 rounded-lg border border-zinc-200 bg-white text-xs font-semibold outline-none theme-input"
                         >
                           <option value="promote">Promouvoir</option>
                           <option value="repeat">Redoubler</option>
@@ -419,7 +419,7 @@ export function AcademicYearModal({
                             onChange={(e) =>
                               updateRow(row.student.id, { targetClasse: e.target.value })
                             }
-                            className="px-2.5 py-1.5 rounded-lg border border-violet-200 bg-violet-50/70 text-xs font-bold text-violet-900 outline-none focus:border-violet-600"
+                            className="px-2.5 py-1.5 rounded-lg border theme-pill-soft text-xs font-bold outline-none theme-input"
                           >
                             {!sortedClassOptions.includes(row.targetClasse) && (
                               <option value={row.targetClasse}>{row.targetClasse}</option>
@@ -454,7 +454,7 @@ export function AcademicYearModal({
             <p className="text-xs font-semibold text-rose-600">{error}</p>
           ) : (
             <p className="text-[11px] text-zinc-500 flex items-center gap-1.5">
-              <Archive className="w-3.5 h-3.5 text-violet-600 shrink-0" />
+              <Archive className="w-3.5 h-3.5 theme-text-accent shrink-0" />
               <span>
                 Un bilan permanent de {school.academicYear} sera conservé dans « Archives des années précédentes ».
               </span>
@@ -473,7 +473,7 @@ export function AcademicYearModal({
               type="button"
               disabled={submitting}
               onClick={() => void handleConfirmTransition()}
-              className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-xs font-bold transition-colors disabled:opacity-60 whitespace-nowrap"
+              className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl theme-btn-primary text-xs font-bold transition-colors disabled:opacity-60 whitespace-nowrap"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${submitting ? 'animate-spin' : ''}`} />
               <span>{submitting ? 'Archivage en cours...' : `Valider et ouvrir ${newAcademicYear}`}</span>
@@ -499,16 +499,16 @@ export function ArchivesView({ schoolName, archives, onBack }: ArchivesViewProps
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl bg-gradient-to-r from-violet-950 via-violet-800 to-indigo-900 text-white p-5 sm:p-6 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="rounded-2xl theme-surface-header border p-5 sm:p-6 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
-            <Archive className="w-5 h-5 text-white" />
+          <div className="w-10 h-10 rounded-xl theme-header-chip border flex items-center justify-center shrink-0">
+            <Archive className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-lg sm:text-xl font-extrabold text-white">
+            <h1 className="text-lg sm:text-xl font-extrabold">
               Archives des années scolaires
             </h1>
-            <p className="text-xs text-violet-200">
+            <p className="text-xs theme-header-subtext">
               Historique officiel en lecture seule · {schoolName}
             </p>
           </div>
@@ -516,23 +516,23 @@ export function ArchivesView({ schoolName, archives, onBack }: ArchivesViewProps
         <button
           type="button"
           onClick={onBack}
-          className="px-4 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-semibold whitespace-nowrap self-start sm:self-auto"
+          className="px-4 py-2 rounded-xl theme-header-chip border text-xs font-semibold whitespace-nowrap self-start sm:self-auto"
         >
           Retour
         </button>
       </div>
 
       {archives.length === 0 ? (
-        <div className="bg-white/95 border border-violet-200 rounded-2xl p-10 text-center space-y-2">
-          <GraduationCap className="w-8 h-8 text-violet-400 mx-auto" />
-          <p className="text-sm font-bold text-violet-950">Aucune année archivée pour le moment</p>
+        <div className="bg-white/95 border theme-border-soft rounded-2xl p-10 text-center space-y-2">
+          <GraduationCap className="w-8 h-8 theme-text-accent opacity-60 mx-auto" />
+          <p className="text-sm font-bold theme-text-ink">Aucune année archivée pour le moment</p>
           <p className="text-xs text-zinc-500 max-w-md mx-auto">
             Lorsque le Directeur clôturera une année scolaire via « Passer à une nouvelle année scolaire », le bilan complet apparaîtra ici.
           </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          <div className="bg-white/95 border border-violet-200 rounded-2xl p-4 space-y-2 h-fit">
+          <div className="bg-white/95 border theme-border-soft rounded-2xl p-4 space-y-2 h-fit">
             <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500 px-1">
               Années clôturées ({archives.length})
             </h2>
@@ -543,17 +543,17 @@ export function ArchivesView({ schoolName, archives, onBack }: ArchivesViewProps
                 onClick={() => setSelectedId(arch.id)}
                 className={`w-full text-left p-3 rounded-xl border transition-all ${
                   selected?.id === arch.id
-                    ? 'bg-violet-700 text-white border-violet-700'
-                    : 'bg-violet-50/50 hover:bg-violet-100/70 text-zinc-800 border-violet-200'
+                    ? 'theme-btn-primary border-transparent'
+                    : 'theme-pill-soft border'
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-extrabold font-mono-nums">{arch.academicYear}</span>
-                  <span className={`text-[11px] font-bold ${selected?.id === arch.id ? 'text-violet-100' : 'text-violet-700'}`}>
+                  <span className={`text-[11px] font-bold ${selected?.id === arch.id ? 'opacity-90' : 'theme-text-accent'}`}>
                     {arch.totalStudents} élèves
                   </span>
                 </div>
-                <p className={`text-[11px] mt-1 ${selected?.id === arch.id ? 'text-violet-200' : 'text-zinc-500'}`}>
+                <p className={`text-[11px] mt-1 ${selected?.id === arch.id ? 'opacity-80' : 'text-zinc-500'}`}>
                   Clôturée le {new Date(arch.closedAtIso).toLocaleDateString('fr-FR')} par {arch.closedByName}
                 </p>
               </button>
@@ -561,10 +561,10 @@ export function ArchivesView({ schoolName, archives, onBack }: ArchivesViewProps
           </div>
 
           {selected && (
-            <div className="lg:col-span-2 bg-white/95 border border-violet-200 rounded-2xl p-5 space-y-5">
+            <div className="lg:col-span-2 bg-white/95 border theme-border-soft rounded-2xl p-5 space-y-5">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-100 pb-4">
                 <div>
-                  <h3 className="text-base font-extrabold text-violet-950">
+                  <h3 className="text-base font-extrabold theme-text-ink">
                     Bilan annuel · {selected.academicYear}
                   </h3>
                   <p className="text-xs text-zinc-500">
@@ -579,7 +579,7 @@ export function ArchivesView({ schoolName, archives, onBack }: ArchivesViewProps
                   <span className="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700 font-bold border border-amber-200">
                     {selected.repeatedCount} redoublants
                   </span>
-                  <span className="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 font-bold border border-indigo-200">
+                  <span className="px-2.5 py-1 rounded-lg bg-sky-50 text-sky-700 font-bold border border-sky-200">
                     {selected.graduatedCount} diplômés
                   </span>
                 </div>
@@ -592,8 +592,8 @@ export function ArchivesView({ schoolName, archives, onBack }: ArchivesViewProps
                   </h4>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {selected.classSummaries.map((cs) => (
-                      <div key={cs.classe} className="p-2.5 rounded-xl bg-violet-50/60 border border-violet-200 text-xs">
-                        <p className="font-bold text-violet-950">{cs.classe}</p>
+                      <div key={cs.classe} className="p-2.5 rounded-xl theme-bg-soft border theme-border-soft text-xs">
+                        <p className="font-bold theme-text-ink">{cs.classe}</p>
                         <p className="text-[11px] text-zinc-600 font-mono-nums">
                           {cs.effectif} él. · Moy {cs.average !== null ? `${cs.average}/20` : '—'}
                         </p>
@@ -623,7 +623,7 @@ export function ArchivesView({ schoolName, archives, onBack }: ArchivesViewProps
                         <tr key={rec.studentId}>
                           <td className="py-2 px-3 font-mono-nums text-zinc-500">{rec.matricule}</td>
                           <td className="py-2 px-3 font-semibold text-zinc-900">{rec.fullName}</td>
-                          <td className="py-2 px-3 text-violet-800 font-medium">{rec.classe}</td>
+                          <td className="py-2 px-3 theme-text-accent font-medium">{rec.classe}</td>
                           <td className="py-2 px-3 text-right font-mono-nums font-bold">
                             {rec.annualAverage !== null ? `${rec.annualAverage}/20` : '—'}
                           </td>

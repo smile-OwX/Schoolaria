@@ -180,6 +180,46 @@ export function AiAssistantView({ school, students, grades }: AiAssistantViewPro
     let assembled = '';
 
     try {
+      const callChatFallback = async (): Promise<string> => {
+        setRetryStatus('Connexion directe au serveur IA...');
+        let headers = await getAuthHeaders(false);
+        let fallbackRes = await apiFetch('/api/ai/chat', {
+          method: 'POST',
+          headers,
+          signal: controller.signal,
+          body: JSON.stringify({
+            messages: apiMessages,
+            schoolContext,
+            mode,
+          }),
+        });
+        if (fallbackRes.status === 401) {
+          headers = await getAuthHeaders(true);
+          fallbackRes = await apiFetch('/api/ai/chat', {
+            method: 'POST',
+            headers,
+            signal: controller.signal,
+            body: JSON.stringify({
+              messages: apiMessages,
+              schoolContext,
+              mode,
+            }),
+          });
+        }
+        const raw = await fallbackRes.text().catch(() => '');
+        let parsed: { reply?: string; error?: string } = {};
+        try {
+          parsed = JSON.parse(raw) as { reply?: string; error?: string };
+        } catch {
+          // Ignore non-JSON error
+        }
+        if (!fallbackRes.ok) {
+          throw new Error(parsed.error || `Erreur HTTP ${fallbackRes.status}`);
+        }
+        if (parsed.error) throw new Error(parsed.error);
+        return (parsed.reply || '').trim();
+      };
+
       const callStream = async (forceRefresh: boolean) => {
         const headers = await getAuthHeaders(forceRefresh);
         return apiFetch('/api/ai/chat-stream', {
@@ -207,6 +247,14 @@ export function AiAssistantView({ school, students, grades }: AiAssistantViewPro
           if (parsed?.error) parsedMessage = parsed.error;
         } catch {
           if (rawErr && !rawErr.startsWith('<')) parsedMessage = rawErr.slice(0, 200);
+        }
+        if (res.status !== 401 && res.status !== 403 && res.status !== 400 && res.status !== 429) {
+          const fallbackReply = await callChatFallback();
+          if (fallbackReply) {
+            setMessages((prev) => [...prev, { role: 'model', text: fallbackReply }]);
+            setRetryStatus(null);
+            return;
+          }
         }
         throw new Error(parsedMessage);
       }
@@ -265,7 +313,25 @@ export function AiAssistantView({ school, students, grades }: AiAssistantViewPro
       }
 
       if (streamError && !assembled.trim()) {
-        throw new Error(streamError);
+        const isConfigOrQuotaErr =
+          /gemini_api_key|api_key|quota|429|403|401/i.test(streamError);
+        if (!isConfigOrQuotaErr) {
+          const fallbackReply = await callChatFallback();
+          if (fallbackReply) {
+            assembled = fallbackReply;
+            streamError = null;
+          }
+        }
+        if (streamError && !assembled.trim()) {
+          throw new Error(streamError);
+        }
+      }
+
+      if (!assembled.trim()) {
+        const fallbackReply = await callChatFallback();
+        if (fallbackReply) {
+          assembled = fallbackReply;
+        }
       }
 
       const finalText = assembled.trim() || 'Aucune réponse générée.';
@@ -313,33 +379,33 @@ export function AiAssistantView({ school, students, grades }: AiAssistantViewPro
   };
 
   return (
-    <div className="bg-white/95 border border-violet-300/80 rounded-2xl overflow-hidden flex flex-col h-[calc(100vh-11rem)] min-h-[520px] shadow-sm">
+    <div className="bg-white/95 border theme-border-soft rounded-2xl overflow-hidden flex flex-col h-[calc(100vh-11rem)] min-h-[520px] shadow-sm">
       {/* Header */}
-      <div className="p-4 sm:p-5 bg-gradient-to-r from-violet-950 via-violet-800 to-indigo-900 text-white border-b border-violet-700 flex flex-wrap items-center justify-between gap-3">
+      <div className="p-4 sm:p-5 theme-surface-header border-b flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-white text-violet-900 flex items-center justify-center shrink-0">
+          <div className="w-9 h-9 rounded-xl theme-nav-active flex items-center justify-center shrink-0">
             <Bot className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-sm font-extrabold text-white flex items-center gap-1.5">
+            <h1 className="text-sm font-extrabold flex items-center gap-1.5">
               <span>Yasmine · Assistante Pédagogique</span>
-              <Sparkles className="w-3.5 h-3.5 text-violet-200" />
+              <Sparkles className="w-3.5 h-3.5 theme-header-subtext" />
             </h1>
-            <p className="text-xs text-violet-200">
+            <p className="text-xs theme-header-subtext">
               Raisonnement avancé sur vos classes, matières & bulletins en temps réel
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="inline-flex p-1 rounded-xl bg-white/15 border border-white/25">
+          <div className="inline-flex p-1 rounded-xl theme-header-chip border">
             <button
               type="button"
               onClick={() => setMode('deep')}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
                 mode === 'deep'
-                  ? 'bg-white text-violet-950 shadow-xs'
-                  : 'text-violet-100 hover:text-white'
+                  ? 'theme-nav-active shadow-xs'
+                  : 'theme-nav-inactive'
               }`}
             >
               <BrainCircuit className="w-3.5 h-3.5" />
@@ -350,8 +416,8 @@ export function AiAssistantView({ school, students, grades }: AiAssistantViewPro
               onClick={() => setMode('fast')}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
                 mode === 'fast'
-                  ? 'bg-white text-violet-950 shadow-xs'
-                  : 'text-violet-100 hover:text-white'
+                  ? 'theme-nav-active shadow-xs'
+                  : 'theme-nav-inactive'
               }`}
             >
               <Zap className="w-3.5 h-3.5" />
@@ -363,7 +429,7 @@ export function AiAssistantView({ school, students, grades }: AiAssistantViewPro
             type="button"
             onClick={handleReset}
             title="Nouvelle discussion"
-            className="p-2 rounded-xl bg-white/15 hover:bg-white/25 border border-white/25 text-white transition-colors"
+            className="p-2 rounded-xl theme-header-chip border transition-colors"
           >
             <RotateCcw className="w-4 h-4" />
           </button>
@@ -371,7 +437,7 @@ export function AiAssistantView({ school, students, grades }: AiAssistantViewPro
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-violet-50/75">
+      <div className="flex-1 overflow-y-auto p-5 space-y-4 theme-bg-soft">
         {messages.map((msg, idx) => (
           <div
             key={idx}
@@ -380,14 +446,14 @@ export function AiAssistantView({ school, students, grades }: AiAssistantViewPro
             }`}
           >
             {msg.role === 'model' && (
-              <div className="w-8 h-8 rounded-lg bg-violet-100 text-violet-700 flex items-center justify-center shrink-0 mt-0.5">
+              <div className="w-8 h-8 rounded-lg theme-pill-soft border flex items-center justify-center shrink-0 mt-0.5">
                 <Bot className="w-4 h-4" />
               </div>
             )}
             <div
               className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
                 msg.role === 'user'
-                  ? 'bg-violet-700 text-white'
+                  ? 'theme-btn-primary'
                   : 'bg-white border border-zinc-200 text-zinc-800 shadow-2xs'
               }`}
             >
@@ -396,7 +462,7 @@ export function AiAssistantView({ school, students, grades }: AiAssistantViewPro
                 <button
                   type="button"
                   onClick={() => sendMessage(msg.retryPrompt!)}
-                  className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-violet-100 hover:bg-violet-200 text-violet-900 text-xs font-semibold transition-colors"
+                  className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-lg theme-pill-soft border text-xs font-semibold transition-colors"
                 >
                   <RotateCcw className="w-3 h-3" />
                   <span>Réessayer</span>
@@ -413,17 +479,17 @@ export function AiAssistantView({ school, students, grades }: AiAssistantViewPro
 
         {loading && streamingReply && (
           <div className="flex items-start gap-3 justify-start">
-            <div className="w-8 h-8 rounded-lg bg-violet-100 text-violet-700 flex items-center justify-center shrink-0 mt-0.5">
+            <div className="w-8 h-8 rounded-lg theme-pill-soft border flex items-center justify-center shrink-0 mt-0.5">
               <Bot className="w-4 h-4" />
             </div>
-            <div className="max-w-[82%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap bg-white border border-violet-200 text-zinc-800 shadow-2xs">
+            <div className="max-w-[82%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap bg-white border theme-border-soft text-zinc-800 shadow-2xs">
               {streamingReply}
             </div>
           </div>
         )}
 
         {loading && !streamingReply && (
-          <div className="flex items-center gap-2 text-xs text-violet-700 font-medium pl-11">
+          <div className="flex items-center gap-2 text-xs theme-text-accent font-medium pl-11">
             <span>
               {retryStatus ||
                 (mode === 'deep'
@@ -445,7 +511,7 @@ export function AiAssistantView({ school, students, grades }: AiAssistantViewPro
               type="button"
               onClick={() => sendMessage(p)}
               disabled={loading}
-              className="text-xs px-3 py-1.5 rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-800 font-medium transition-colors text-left"
+              className="text-xs px-3 py-1.5 rounded-lg theme-pill-soft border font-medium transition-colors text-left"
             >
               {p}
             </button>
@@ -458,7 +524,7 @@ export function AiAssistantView({ school, students, grades }: AiAssistantViewPro
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Posez votre question à Yasmine (suivi, appréciations, conseils)..."
-            className="flex-1 px-4 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 outline-none text-sm"
+            className="flex-1 px-4 py-2.5 rounded-xl border border-zinc-200 theme-input outline-none text-sm"
           />
           {loading ? (
             <button
@@ -473,7 +539,7 @@ export function AiAssistantView({ school, students, grades }: AiAssistantViewPro
             <button
               type="submit"
               disabled={!input.trim()}
-              className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-sm font-semibold transition-colors disabled:opacity-50 whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl theme-btn-primary text-sm font-semibold transition-colors disabled:opacity-50 whitespace-nowrap shrink-0"
             >
               <Send className="w-4 h-4" />
               Envoyer

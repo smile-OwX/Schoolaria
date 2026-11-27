@@ -291,6 +291,44 @@
   box-shadow: 0 0 0 3px rgba(var(--theme-ripple-rgb), 0.14);
 }
 
+.theme-bg-soft {
+  background-color: var(--theme-accent-soft);
+}
+
+.theme-bg-soft-hover:hover {
+  background-color: var(--theme-accent-soft-hover);
+}
+
+.theme-card-tinted {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96) 0%, var(--theme-accent-soft) 100%);
+}
+
+.theme-table-head {
+  background-color: var(--theme-accent-soft);
+  color: var(--theme-ink);
+  border-color: var(--theme-accent-border);
+}
+
+.theme-progress-track {
+  background-color: var(--theme-accent-soft-hover);
+}
+
+.theme-progress-fill {
+  background-color: var(--theme-accent);
+}
+
+.theme-border-accent {
+  border-color: var(--theme-accent);
+}
+
+.theme-text-accent-hover:hover {
+  color: var(--theme-accent-text);
+}
+
+.theme-border-accent-hover:hover {
+  border-color: var(--theme-accent);
+}
+
 @keyframes academicFloatSlow {
   0%, 100% {
     transform: translate3d(0, 0, 0) rotate(0deg);

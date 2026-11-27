@@ -36,6 +36,7 @@ import {
 } from '../lib/schoolService.ts';
 import { getAuthHeaders } from '../lib/firebase.ts';
 import { apiFetch } from '../lib/apiClient.ts';
+import { getSchoolThemeDefinition } from '../lib/schoolTheme.ts';
 import {
   ComputedStudentBulletin,
   computeClassroomBulletins,
@@ -58,6 +59,7 @@ interface BulletinViewProps {
   actorName: string;
   actorRole?: UserRole;
   readOnly?: boolean;
+  canUseAi?: boolean;
   allowBatchPrint?: boolean;
   school: SchoolProfile;
   classrooms?: Classroom[];
@@ -75,6 +77,7 @@ export function BulletinView({
   actorName,
   actorRole = 'censeur',
   readOnly = false,
+  canUseAi = false,
   allowBatchPrint,
   school,
   classrooms = [],
@@ -267,7 +270,7 @@ export function BulletinView({
   };
 
   const handleGenerateAiAppreciation = async () => {
-    if (!student || !singleComputed || singleComputed.studentAvg === null) return;
+    if (!canUseAi || !student || !singleComputed || singleComputed.studentAvg === null) return;
     setGeneratingAi(true);
     setErrorNotice(null);
     try {
@@ -409,14 +412,15 @@ export function BulletinView({
       )
       .join('');
 
+    const themeAccent = getSchoolThemeDefinition(school.theme).accentHex;
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Bulletin ${escapeHtml(student.nom)} ${escapeHtml(student.prenoms)}</title></head><body style="font-family:Arial,sans-serif;padding:24px;color:#18181b;">
-      <div style="display:flex;justify-content:space-between;border-bottom:2px solid #6d28d9;padding-bottom:12px;margin-bottom:16px;">
-        <div><h2 style="margin:0;color:#6d28d9;">${escapeHtml(school.schoolName)}</h2><p style="margin:4px 0 0;font-size:12px;">${escapeHtml(school.motto || '')} · ${escapeHtml(school.address || '')}</p></div>
+      <div style="display:flex;justify-content:space-between;border-bottom:2px solid ${themeAccent};padding-bottom:12px;margin-bottom:16px;">
+        <div><h2 style="margin:0;color:${themeAccent};">${escapeHtml(school.schoolName)}</h2><p style="margin:4px 0 0;font-size:12px;">${escapeHtml(school.motto || '')} · ${escapeHtml(school.address || '')}</p></div>
         <div style="text-align:right;"><h3 style="margin:0;">${docTitle}</h3><p style="margin:4px 0 0;font-size:12px;">Année scolaire : ${escapeHtml(school.academicYear)}</p></div>
       </div>
       <p><strong>Élève :</strong> ${escapeHtml(student.nom)} ${escapeHtml(student.prenoms)} | <strong>Matricule :</strong> ${escapeHtml(student.matricule)} | <strong>Classe :</strong> ${escapeHtml(student.classe)} | <strong>Sexe :</strong> ${escapeHtml(student.sexe)} | <strong>Âge :</strong> ${escapeHtml(student.age)} ans${singleComputed.classroom?.headTeacher ? ` | <strong>Titulaire :</strong> ${escapeHtml(singleComputed.classroom.headTeacher)}` : ''}</p>
       <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:12px;">
-        <thead><tr style="background:#f5f3ff;">
+        <thead><tr style="background:#f4f4f5;">
           <th style="padding:8px;border:1px solid #d4d4d8;text-align:left;">Matière</th>
           <th style="padding:8px;border:1px solid #d4d4d8;">Coef</th>
           <th style="padding:8px;border:1px solid #d4d4d8;">Moy. Cl.</th>
@@ -428,7 +432,7 @@ export function BulletinView({
         </tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>
-      <div style="margin-top:16px;padding:12px;border:1px solid #d4d4d8;background:#faf9fe;">
+      <div style="margin-top:16px;padding:12px;border:1px solid #d4d4d8;background:#fafafa;">
         <p style="margin:4px 0;"><strong>Moyenne Générale :</strong> ${escapeHtml(singleComputed.studentAvg ?? '—')} / 20 | <strong>Rang :</strong> ${escapeHtml(formatRank(singleComputed.rank, singleComputed.totalStudents))} | <strong>Moyenne de classe :</strong> ${escapeHtml(singleComputed.classAvg ?? '—')}/20</p>
         <p style="margin:4px 0;"><strong>Absences :</strong> ${escapeHtml(absences)} h | <strong>Conduite :</strong> ${escapeHtml(conduite)} | <strong>Décision :</strong> ${escapeHtml(decision || singleComputed.mention.label)}</p>
         <p style="margin:8px 0 0;"><strong>Appréciation du conseil :</strong> ${escapeHtml(generalRemark || '—')}</p>
@@ -452,7 +456,7 @@ export function BulletinView({
   if (activeStudents.length === 0) {
     return (
       <div className="bg-white border border-zinc-200 rounded-2xl p-12 text-center">
-        <Award className="w-10 h-10 text-violet-300 mx-auto mb-3" />
+        <Award className="w-10 h-10 theme-text-accent opacity-50 mx-auto mb-3" />
         <h2 className="text-base font-bold text-zinc-900">Aucun élève disponible</h2>
         <p className="text-sm text-zinc-500 mt-1">
           Inscrivez des élèves et saisissez leurs notes pour générer leurs bulletins scolaires.
@@ -464,18 +468,18 @@ export function BulletinView({
   return (
     <div className="space-y-6">
       {/* Control Toolbar */}
-      <div className="no-print rounded-2xl bg-gradient-to-r from-violet-950 via-violet-800 to-indigo-900 text-white border border-violet-700/70 p-4 sm:p-5 space-y-4 shadow-md">
+      <div className="no-print rounded-2xl theme-surface-header border p-4 sm:p-5 space-y-4 shadow-md">
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
             {canBatchPrint && availableClasses.length > 0 && (
-              <div className="inline-flex p-1 rounded-full bg-white/15 border border-white/25">
+              <div className="inline-flex p-1 rounded-full theme-header-chip border">
                 <button
                   type="button"
                   onClick={() => setViewMode('single')}
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${
                     viewMode === 'single'
-                      ? 'bg-white text-violet-950 shadow-xs'
-                      : 'text-violet-100 hover:text-white'
+                      ? 'theme-nav-active shadow-xs'
+                      : 'theme-nav-inactive'
                   }`}
                 >
                   <User className="w-3.5 h-3.5" />
@@ -491,8 +495,8 @@ export function BulletinView({
                   }}
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${
                     viewMode === 'batch'
-                      ? 'bg-white text-violet-950 shadow-xs'
-                      : 'text-violet-100 hover:text-white'
+                      ? 'theme-nav-active shadow-xs'
+                      : 'theme-nav-inactive'
                   }`}
                 >
                   <Layers className="w-3.5 h-3.5" />
@@ -505,7 +509,7 @@ export function BulletinView({
               <select
                 value={student?.id ?? ''}
                 onChange={(e) => setSelectedStudentId(e.target.value)}
-                className="px-3.5 py-2 rounded-xl border border-white/25 bg-white text-sm font-semibold text-violet-950 focus:border-white outline-none max-w-xs"
+                className="px-3.5 py-2 rounded-xl border border-zinc-200 bg-white text-sm font-semibold text-zinc-900 theme-input outline-none max-w-xs"
               >
                 {activeStudents.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -517,7 +521,7 @@ export function BulletinView({
               <select
                 value={selectedBatchClass}
                 onChange={(e) => setSelectedBatchClass(e.target.value)}
-                className="px-3.5 py-2 rounded-xl border border-white/25 bg-white text-sm font-semibold text-violet-950 focus:border-white outline-none"
+                className="px-3.5 py-2 rounded-xl border border-zinc-200 bg-white text-sm font-semibold text-zinc-900 theme-input outline-none"
               >
                 {availableClasses.map((c) => (
                   <option key={c.name} value={c.name}>
@@ -527,7 +531,7 @@ export function BulletinView({
               </select>
             )}
 
-            <div className="inline-flex p-1 rounded-full bg-white/15 border border-white/25">
+            <div className="inline-flex p-1 rounded-full theme-header-chip border">
               {availablePeriods.map((t) => {
                 const active = effectiveTrimester === t;
                 return (
@@ -536,14 +540,14 @@ export function BulletinView({
                     type="button"
                     onClick={() => setTrimester(t)}
                     className={`relative px-3.5 py-1.5 rounded-full text-xs font-bold transition-colors whitespace-nowrap ${
-                      active ? 'text-violet-950' : 'text-violet-100 hover:text-white'
+                      active ? 'theme-nav-active' : 'theme-nav-inactive'
                     }`}
                   >
                     {active && (
                       <motion.span
                         layoutId="bulletin-trimester-pill"
                         transition={{ type: 'spring', stiffness: 480, damping: 32 }}
-                        className="absolute inset-0 rounded-full bg-white shadow-xs"
+                        className="absolute inset-0 rounded-full bg-[var(--theme-nav-active-bg)] shadow-xs"
                       />
                     )}
                     <span className="relative z-10">{getPeriodLabel(activeCycle, t)}</span>
@@ -559,9 +563,9 @@ export function BulletinView({
                 <button
                   type="button"
                   onClick={handleDownloadEditableDoc}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-white/25 bg-white/15 hover:bg-white/25 text-xs font-semibold text-white transition-colors"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border theme-header-chip text-xs font-semibold transition-colors"
                 >
-                  <FileDown className="w-4 h-4 text-white" />
+                  <FileDown className="w-4 h-4" />
                   <span>Modifiable (.doc)</span>
                 </button>
 
@@ -569,18 +573,18 @@ export function BulletinView({
                   type="button"
                   onClick={handleDownloadSinglePdf}
                   disabled={generatingPdf}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-white/25 bg-white/15 hover:bg-white/25 text-xs font-semibold text-white transition-colors disabled:opacity-60"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border theme-header-chip text-xs font-semibold transition-colors disabled:opacity-60"
                 >
-                  <FileText className="w-4 h-4 text-white" />
+                  <FileText className="w-4 h-4" />
                   <span>{generatingPdf ? 'PDF...' : 'Télécharger PDF'}</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => window.print()}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white hover:bg-violet-100 text-violet-950 text-xs font-bold transition-colors shadow-xs"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl theme-nav-active text-xs font-bold transition-colors shadow-xs"
                 >
-                  <Printer className="w-4 h-4 text-violet-700" />
+                  <Printer className="w-4 h-4" />
                   <span>Imprimer</span>
                 </button>
               </>
@@ -604,9 +608,9 @@ export function BulletinView({
                   type="button"
                   onClick={handlePrintBatch}
                   disabled={batchBulletins.length === 0}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white hover:bg-violet-100 text-violet-950 text-xs font-bold transition-colors shadow-xs disabled:opacity-60"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl theme-nav-active text-xs font-bold transition-colors shadow-xs disabled:opacity-60"
                 >
-                  <Printer className="w-4 h-4 text-violet-700" />
+                  <Printer className="w-4 h-4" />
                   <span>Imprimer toute la classe ({batchBulletins.length})</span>
                 </button>
               </>
@@ -638,7 +642,7 @@ export function BulletinView({
           {/* Suivi des notes (Multi-trimester Evolution Strip) */}
           <div className="no-print bg-white border border-zinc-200/90 rounded-2xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-700 flex items-center justify-center shrink-0">
+              <div className="w-10 h-10 rounded-xl theme-bg-soft theme-text-accent flex items-center justify-center shrink-0">
                 <TrendingUp className="w-5 h-5" />
               </div>
               <div>
@@ -659,8 +663,8 @@ export function BulletinView({
                   onClick={() => setTrimester(item.trimester)}
                   className={`p-3 rounded-xl border text-left transition-all ${
                     effectiveTrimester === item.trimester
-                      ? 'border-violet-500 bg-violet-50/50'
-                      : 'border-zinc-200 bg-zinc-50/40 hover:border-violet-300'
+                      ? 'theme-border-accent theme-bg-soft'
+                      : 'border-zinc-200 bg-zinc-50/40 theme-border-accent-hover'
                   }`}
                 >
                   <p className="text-[11px] font-medium text-zinc-500">
@@ -678,9 +682,9 @@ export function BulletinView({
           {/* Official Printable A4 Bulletin */}
           <div className="print-only-container bg-white border border-zinc-200 rounded-2xl p-6 sm:p-8 space-y-6">
             {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b-2 border-violet-700 pb-5">
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b-2 theme-border-accent pb-5">
               <div>
-                <h2 className="text-xl font-extrabold text-violet-800 uppercase tracking-tight">
+                <h2 className="text-xl font-extrabold theme-text-accent uppercase tracking-tight">
                   {school.schoolName}
                 </h2>
                 <p className="text-xs text-zinc-500 mt-0.5">
@@ -701,7 +705,7 @@ export function BulletinView({
             </div>
 
             {/* Student Info Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-[#FAF9FE] border border-violet-100 rounded-xl p-4 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 theme-card-tinted border theme-border-soft rounded-xl p-4 text-xs">
               <div>
                 <span className="text-zinc-500 block">Nom & Prénoms</span>
                 <strong className="text-zinc-900 text-sm">
@@ -714,7 +718,7 @@ export function BulletinView({
               </div>
               <div>
                 <span className="text-zinc-500 block">Classe · Cycle</span>
-                <strong className="text-violet-800">{student.classe} ({student.cycle})</strong>
+                <strong className="theme-text-accent">{student.classe} ({student.cycle})</strong>
                 {singleComputed.classroom?.headTeacher && (
                   <span className="block text-[11px] text-zinc-600 mt-0.5">
                     Titulaire : <strong>{singleComputed.classroom.headTeacher}</strong>
@@ -733,7 +737,7 @@ export function BulletinView({
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse border border-zinc-200 text-xs">
                 <thead>
-                  <tr className="bg-violet-50 text-violet-950 font-bold uppercase text-[11px]">
+                  <tr className="theme-table-head font-bold uppercase text-[11px]">
                     <th className="py-2.5 px-3 border border-zinc-200">Matière</th>
                     <th className="py-2.5 px-2 border border-zinc-200 text-center">Coef</th>
                     <th className="py-2.5 px-2 border border-zinc-200 text-center">Moy. Cl.</th>
@@ -799,7 +803,7 @@ export function BulletinView({
                 </div>
                 <div className="flex justify-between py-1 border-b border-zinc-100">
                   <span className="text-zinc-500">Moyenne Générale</span>
-                  <strong className="font-mono-nums text-base text-violet-700">
+                  <strong className="font-mono-nums text-base theme-text-accent">
                     {singleComputed.studentAvg !== null
                       ? `${singleComputed.studentAvg.toFixed(2)} / 20`
                       : '—'}
@@ -824,12 +828,12 @@ export function BulletinView({
                   <h4 className="font-bold text-zinc-900 uppercase text-[11px] tracking-wider">
                     Conseil de Classe {readOnly ? '' : '(Modifiable)'}
                   </h4>
-                  {!readOnly && (
+                  {!readOnly && canUseAi && (
                     <button
                       type="button"
                       onClick={handleGenerateAiAppreciation}
                       disabled={generatingAi || singleComputed.studentAvg === null}
-                      className="no-print inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-700 font-semibold transition-colors disabled:opacity-50"
+                      className="no-print inline-flex items-center gap-1 px-2.5 py-1 rounded-lg theme-pill-soft border font-semibold transition-colors disabled:opacity-50"
                     >
                       <Sparkles className="w-3 h-3" />
                       {generatingAi ? 'Yasmine rédige...' : 'Suggérer (Yasmine)'}
@@ -849,7 +853,7 @@ export function BulletinView({
                       onChange={(e) =>
                         setAbsences(Math.min(365, Math.max(0, Math.round(Number(e.target.value) || 0))))
                       }
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-zinc-200 font-mono-nums outline-none focus:border-violet-600 read-only:bg-zinc-50"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-zinc-200 font-mono-nums outline-none theme-input read-only:bg-zinc-50"
                     />
                   </div>
                   <div>
@@ -859,7 +863,7 @@ export function BulletinView({
                       readOnly={readOnly}
                       value={conduite}
                       onChange={(e) => setConduite(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-zinc-200 outline-none focus:border-violet-600 read-only:bg-zinc-50"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-zinc-200 outline-none theme-input read-only:bg-zinc-50"
                     />
                   </div>
                 </div>
@@ -872,7 +876,7 @@ export function BulletinView({
                     value={decision}
                     onChange={(e) => setDecision(e.target.value)}
                     placeholder={singleComputed.mention.label}
-                    className="w-full px-2.5 py-1.5 rounded-lg border border-zinc-200 font-semibold text-zinc-900 outline-none focus:border-violet-600 read-only:bg-zinc-50"
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-zinc-200 font-semibold text-zinc-900 outline-none theme-input read-only:bg-zinc-50"
                   />
                 </div>
 
@@ -884,7 +888,7 @@ export function BulletinView({
                     value={generalRemark}
                     onChange={(e) => setGeneralRemark(e.target.value)}
                     placeholder="Observations de la direction..."
-                    className="w-full px-2.5 py-1.5 rounded-lg border border-zinc-200 outline-none focus:border-violet-600 resize-none read-only:bg-zinc-50"
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-zinc-200 outline-none theme-input resize-none read-only:bg-zinc-50"
                   />
                 </div>
 
@@ -931,16 +935,16 @@ export function BulletinView({
       {/* BATCH CLASSROOM MODE (1 bulletin per A4 page, ready for single giant PDF & batch print) */}
       {viewMode === 'batch' && canBatchPrint && (
         <div className="space-y-6">
-          <div className="no-print bg-violet-50 border border-violet-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="no-print theme-card-tinted border theme-border-soft rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <h3 className="text-sm font-bold text-violet-950">
+              <h3 className="text-sm font-bold theme-text-ink">
                 Aperçu du lot · Classe {selectedBatchClass} · {getPeriodLabel(activeCycle, effectiveTrimester)}
               </h3>
-              <p className="text-xs text-violet-700 mt-0.5">
+              <p className="text-xs theme-text-accent mt-0.5">
                 {batchBulletins.length} bulletin(s) A4 prêts à être exportés dans un seul fichier PDF ou imprimés en série (1 élève par page).
               </p>
             </div>
-            <span className="px-3 py-1 rounded-full bg-white border border-violet-200 text-xs font-extrabold text-violet-900 shrink-0">
+            <span className="px-3 py-1 rounded-full bg-white border theme-border-soft text-xs font-extrabold theme-text-ink shrink-0">
               {batchBulletins.length} page{batchBulletins.length > 1 ? 's' : ''} A4
             </span>
           </div>
@@ -951,9 +955,9 @@ export function BulletinView({
               className="print-only-container print-bulletin-page bg-white border border-zinc-200 rounded-2xl p-6 sm:p-7 space-y-4 print:space-y-3"
             >
               {/* Header */}
-              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b-2 border-violet-700 pb-4 print:pb-3">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b-2 theme-border-accent pb-4 print:pb-3">
                 <div>
-                  <h2 className="text-lg font-extrabold text-violet-800 uppercase tracking-tight">
+                  <h2 className="text-lg font-extrabold theme-text-accent uppercase tracking-tight">
                     {school.schoolName}
                   </h2>
                   <p className="text-[11px] text-zinc-500 mt-0.5">
@@ -974,7 +978,7 @@ export function BulletinView({
               </div>
 
               {/* Student Info Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-[#FAF9FE] border border-violet-100 rounded-xl p-3 text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 theme-card-tinted border theme-border-soft rounded-xl p-3 text-xs">
                 <div>
                   <span className="text-zinc-500 block text-[11px]">Nom & Prénoms</span>
                   <strong className="text-zinc-900">
@@ -987,7 +991,7 @@ export function BulletinView({
                 </div>
                 <div>
                   <span className="text-zinc-500 block text-[11px]">Classe · Cycle</span>
-                  <strong className="text-violet-800">
+                  <strong className="theme-text-accent">
                     {item.student.classe} ({item.student.cycle})
                   </strong>
                   {item.classroom?.headTeacher && (
@@ -1008,7 +1012,7 @@ export function BulletinView({
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse border border-zinc-200 text-[11px]">
                   <thead>
-                    <tr className="bg-violet-50 text-violet-950 font-bold uppercase text-[10px]">
+                    <tr className="theme-table-head font-bold uppercase text-[10px]">
                       <th className="py-1.5 px-2.5 border border-zinc-200">Matière</th>
                       <th className="py-1.5 px-1.5 border border-zinc-200 text-center">Coef</th>
                       <th className="py-1.5 px-1.5 border border-zinc-200 text-center">Moy. Cl.</th>
@@ -1074,7 +1078,7 @@ export function BulletinView({
                   </div>
                   <div className="flex justify-between border-b border-zinc-100 pb-1">
                     <span className="text-zinc-500">Moyenne Générale</span>
-                    <strong className="font-mono-nums text-sm text-violet-700">
+                    <strong className="font-mono-nums text-sm theme-text-accent">
                       {item.studentAvg !== null ? `${item.studentAvg.toFixed(2)} / 20` : '—'}
                     </strong>
                   </div>
@@ -1092,7 +1096,7 @@ export function BulletinView({
                   </div>
                 </div>
 
-                <div className="border border-zinc-200 rounded-xl p-3 space-y-1.5 bg-[#FAF9FE]">
+                <div className="border theme-border-soft rounded-xl p-3 space-y-1.5 theme-card-tinted">
                   <h4 className="font-bold text-zinc-900 uppercase text-[10px] tracking-wider">
                     Conseil de Classe
                   </h4>
@@ -1100,7 +1104,7 @@ export function BulletinView({
                     <strong>Absences :</strong> {item.absences} h · <strong>Conduite :</strong>{' '}
                     {item.conduite || 'Bonne'}
                   </p>
-                  <p className="text-violet-900 font-semibold">
+                  <p className="theme-text-ink font-semibold">
                     <strong>Décision :</strong> {item.decision}
                   </p>
                   <p className="text-zinc-600 line-clamp-2">

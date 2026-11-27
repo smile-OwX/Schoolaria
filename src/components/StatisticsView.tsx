@@ -133,15 +133,15 @@ export function StatisticsView({
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl bg-gradient-to-r from-violet-950 via-violet-800 to-indigo-900 text-white p-6 shadow-md border border-violet-700/70 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="rounded-2xl theme-surface-header p-6 shadow-md border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-extrabold text-white">Statistiques de l'établissement</h1>
-          <p className="text-xs text-violet-100/90">
+          <h1 className="text-xl font-extrabold">Statistiques de l'établissement</h1>
+          <p className="text-xs theme-header-subtext">
             Effectifs, parité, moyennes générales et taux de réussite par classe et division.
           </p>
         </div>
 
-        <div className="inline-flex flex-wrap p-1 rounded-full bg-white/15 border border-white/25 self-start">
+        <div className="inline-flex flex-wrap p-1 rounded-full theme-header-chip border self-start">
           {(
             [
               { t: 1 as const, label: 'Trim. 1 / S1' },
@@ -156,14 +156,14 @@ export function StatisticsView({
                 type="button"
                 onClick={() => setTrimester(t)}
                 className={`relative px-3.5 py-1.5 rounded-full text-xs font-bold transition-colors whitespace-nowrap ${
-                  active ? 'text-violet-950' : 'text-violet-100 hover:text-white'
+                  active ? 'text-[var(--theme-nav-active-fg)]' : 'theme-nav-inactive'
                 }`}
               >
                 {active && (
                   <motion.span
                     layoutId="stats-trimester-pill"
                     transition={{ type: 'spring', stiffness: 480, damping: 32 }}
-                    className="absolute inset-0 rounded-full bg-white shadow-xs"
+                    className="absolute inset-0 rounded-full bg-[var(--theme-nav-active-bg)] shadow-xs"
                   />
                 )}
                 <span className="relative z-10">{label}</span>
@@ -174,26 +174,26 @@ export function StatisticsView({
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-gradient-to-br from-white/95 to-violet-100/80 backdrop-blur-xs border border-violet-300/80 rounded-2xl p-5 shadow-xs">
+        <div className="theme-card-tinted backdrop-blur-xs border theme-border-soft rounded-2xl p-5 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-zinc-500">Parité Garçons / Filles</span>
-            <Users className="w-4 h-4 text-violet-600" />
+            <Users className="w-4 h-4 theme-text-accent" />
           </div>
           <div className="mt-3 flex items-baseline gap-3 font-mono-nums">
             <span className="text-xl font-bold text-zinc-900">{boys} G ({boysPct}%)</span>
             <span className="text-zinc-300">/</span>
-            <span className="text-xl font-bold text-violet-700">{girls} F ({girlsPct}%)</span>
+            <span className="text-xl font-bold theme-text-accent">{girls} F ({girlsPct}%)</span>
           </div>
-          <div className="mt-3 h-2.5 w-full rounded-full bg-violet-100 overflow-hidden flex">
+          <div className="mt-3 h-2.5 w-full rounded-full theme-progress-track overflow-hidden flex">
             <div style={{ width: `${boysPct}%` }} className="bg-zinc-800 h-full transition-all" />
-            <div style={{ width: `${girlsPct}%` }} className="bg-violet-600 h-full transition-all" />
+            <div style={{ width: `${girlsPct}%` }} className="theme-progress-fill h-full transition-all" />
           </div>
         </div>
 
-        <div className="bg-gradient-to-br from-white/95 to-indigo-100/80 backdrop-blur-xs border border-indigo-300/80 rounded-2xl p-5 shadow-xs">
+        <div className="theme-card-tinted backdrop-blur-xs border theme-border-soft rounded-2xl p-5 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-indigo-800">Répartition par Cycle</span>
-            <BarChart3 className="w-4 h-4 text-violet-600" />
+            <span className="text-xs font-semibold theme-text-ink">Répartition par Cycle</span>
+            <BarChart3 className="w-4 h-4 theme-text-accent" />
           </div>
           <div className="mt-3 space-y-2 text-xs">
             {(['Collège', 'Lycée'] as CycleType[]).map((cycle) => {
@@ -203,8 +203,8 @@ export function StatisticsView({
               return (
                 <div key={cycle} className="flex items-center justify-between gap-2">
                   <span className="text-zinc-700 font-medium w-20">{cycle}</span>
-                  <div className="flex-1 h-2 bg-violet-100 rounded-full overflow-hidden">
-                    <div style={{ width: `${pct}%` }} className="h-full bg-violet-700 rounded-full" />
+                  <div className="flex-1 h-2 theme-progress-track rounded-full overflow-hidden">
+                    <div style={{ width: `${pct}%` }} className="h-full theme-progress-fill rounded-full" />
                   </div>
                   <span className="font-mono-nums font-semibold text-zinc-900 w-10 text-right">
                     {count}
@@ -229,10 +229,10 @@ export function StatisticsView({
         </div>
       </div>
 
-      <div className="bg-white/95 backdrop-blur-xs border border-violet-300/80 rounded-2xl overflow-hidden shadow-xs">
-        <div className="p-5 border-b border-violet-200 bg-violet-100/75 flex items-center justify-between">
-          <h2 className="text-sm font-bold text-violet-950">Performance détaillée par classe</h2>
-          <span className="text-xs text-violet-700 font-semibold font-mono-nums">
+      <div className="bg-white/95 backdrop-blur-xs border theme-border-soft rounded-2xl overflow-hidden shadow-xs">
+        <div className="p-5 border-b theme-table-head flex items-center justify-between">
+          <h2 className="text-sm font-bold theme-text-ink">Performance détaillée par classe</h2>
+          <span className="text-xs theme-text-accent font-semibold font-mono-nums">
             {classRows.length} / {classList.length} classes peuplées
           </span>
         </div>
@@ -260,9 +260,9 @@ export function StatisticsView({
                   <tr
                     key={row.classe}
                     onClick={() => onSelectClass(row.classe)}
-                    className="hover:bg-violet-50/40 cursor-pointer transition-colors"
+                    className="theme-bg-soft-hover cursor-pointer transition-colors"
                   >
-                    <td className="py-3 px-4 font-bold text-violet-800">{row.classe}</td>
+                    <td className="py-3 px-4 font-bold theme-text-accent">{row.classe}</td>
                     <td className="py-3 px-4 text-zinc-500">{row.cycle}</td>
                     <td className="py-3 px-3 text-right font-mono-nums font-semibold text-zinc-900">
                       {row.total}
@@ -291,9 +291,9 @@ export function StatisticsView({
                     <td className="py-3 px-4">
                       {row.topStudent ? (
                         <span className="inline-flex items-center gap-1.5 text-zinc-800 font-medium">
-                          <Award className="w-3.5 h-3.5 text-violet-600 shrink-0" />
+                          <Award className="w-3.5 h-3.5 theme-text-accent shrink-0" />
                           {row.topStudent.name}
-                          <span className="font-mono-nums text-violet-700 font-bold">
+                          <span className="font-mono-nums theme-text-accent font-bold">
                             ({row.topStudent.avg.toFixed(2)})
                           </span>
                         </span>

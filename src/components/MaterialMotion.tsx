@@ -104,7 +104,7 @@ export function useGlobalMaterialRipple(): void {
 
       const cls = typeof btn.className === 'string' ? btn.className : '';
       const isDarkSurface =
-        /(theme-btn-primary|bg-violet-[6-9]|bg-indigo-[6-9]|bg-purple-[6-9]|bg-emerald-[6-9]|bg-zinc-9|from-violet|from-indigo|text-white)/.test(
+        /(theme-btn-primary|bg-emerald-[6-9]|bg-zinc-9|text-white)/.test(
           cls
         ) && !/bg-white(\s|$)/.test(cls);
 
@@ -293,7 +293,7 @@ export function GoogleAppsLauncher({
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   onClick={() => setOpen(false)}
-                  className="fixed inset-0 z-40 bg-violet-950/25 sm:bg-transparent"
+                  className="fixed inset-0 z-40 bg-black/25 sm:bg-transparent"
                   aria-hidden="true"
                 />
                 <motion.div

@@ -30,15 +30,15 @@ export interface NotificationModeOption {
 }
 
 const ROLE_ALLOWED_TABS: Record<RoleId, readonly NavTabId[]> = {
-  // Directeur : gouvernance, nominations, gestion des classes (création/suppression), stats, archives, sécurité, réglages & communication
-  admin: ['hub', 'makelist', 'roles', 'stats', 'archives', 'audit', 'messages', 'notifications', 'settings'],
+  // Directeur : gouvernance, nominations, gestion des classes (création/suppression), stats, archives, sécurité, Yasmine IA, réglages & communication
+  admin: ['hub', 'makelist', 'roles', 'stats', 'archives', 'audit', 'assistant', 'messages', 'notifications', 'settings'],
   // Censeur : pédagogie, classes/notes, bulletins, stats, profs/parents, Yasmine IA, communication (pas d'accès au panel Secrétaire)
   censeur: ['hub', 'makelist', 'classdetail', 'bulletins', 'stats', 'roles', 'assistant', 'messages', 'notifications'],
-  // Secrétaire : inscriptions élèves, listes de classes, impression PDF bulletins, archives, stats, communication staff
-  secretaire: ['hub', 'inscription', 'makelist', 'classdetail', 'bulletins', 'archives', 'stats', 'messages', 'notifications'],
-  // Professeur : classes assignées, saisie notes, appréciations bulletins, Yasmine IA, communication vers Censeur/Directeur
-  teacher: ['hub', 'makelist', 'classdetail', 'bulletins', 'assistant', 'messages', 'notifications'],
-  // Parent : tableau de bord enfants, bulletins lecture seule, messages & notifications vers Censeur
+  // Secrétaire : inscriptions élèves, listes de classes, impression PDF bulletins, archives, stats, Yasmine IA, communication staff
+  secretaire: ['hub', 'inscription', 'makelist', 'classdetail', 'bulletins', 'archives', 'stats', 'assistant', 'messages', 'notifications'],
+  // Professeur : classes assignées, saisie notes, appréciations bulletins, communication vers Censeur/Directeur (sans accès IA)
+  teacher: ['hub', 'makelist', 'classdetail', 'bulletins', 'messages', 'notifications'],
+  // Parent : tableau de bord enfants, bulletins lecture seule, messages & notifications vers Censeur (sans accès IA)
   parent: ['hub', 'bulletins', 'messages', 'notifications'],
 };
 

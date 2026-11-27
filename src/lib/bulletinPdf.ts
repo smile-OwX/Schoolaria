@@ -16,6 +16,17 @@ import {
   getPeriodLabel,
   getPeriodShortLabel,
 } from '../types/school.ts';
+import { getSchoolThemeDefinition } from './schoolTheme.ts';
+
+function hexToRgbTuple(hex: string): [number, number, number] {
+  const clean = hex.replace('#', '');
+  if (clean.length !== 6) return [109, 40, 217];
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return [109, 40, 217];
+  return [r, g, b];
+}
 
 export interface ComputedSubjectRow {
   subject: Subject;
@@ -248,11 +259,13 @@ function drawSingleBulletinPage(
   const marginX = 12;
   const contentWidth = pageWidth - marginX * 2;
   const { student } = bulletin;
+  const themeDef = getSchoolThemeDefinition(school.theme);
+  const [accentR, accentG, accentB] = hexToRgbTuple(themeDef.accentHex);
 
   // Header
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
-  doc.setTextColor(91, 33, 182);
+  doc.setTextColor(accentR, accentG, accentB);
   doc.text(pdfText(school.schoolName.toUpperCase()), marginX, 15);
 
   doc.setFont('helvetica', 'normal');
@@ -283,14 +296,14 @@ function drawSingleBulletinPage(
     { align: 'right' }
   );
 
-  // Violet header border
-  doc.setDrawColor(109, 40, 217);
+  // Theme header border
+  doc.setDrawColor(accentR, accentG, accentB);
   doc.setLineWidth(0.7);
   doc.line(marginX, 24, pageWidth - marginX, 24);
 
   // Student info box
-  doc.setFillColor(250, 249, 254);
-  doc.setDrawColor(221, 214, 254);
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(212, 212, 216);
   doc.setLineWidth(0.35);
   doc.roundedRect(marginX, 27.5, contentWidth, 18, 2, 2, 'FD');
 
@@ -311,7 +324,8 @@ function drawSingleBulletinPage(
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.8);
-    doc.setTextColor(idx === 2 ? 91 : 24, idx === 2 ? 33 : 24, idx === 2 ? 182 : 27);
+    if (idx === 2) doc.setTextColor(accentR, accentG, accentB);
+    else doc.setTextColor(24, 24, 27);
     doc.text(pdfText(col.value), cx, 37.5, { maxWidth: colW - 5 });
 
     if (idx === 2 && bulletin.classroom?.headTeacher) {
@@ -352,7 +366,7 @@ function drawSingleBulletinPage(
       valign: 'middle',
     },
     headStyles: {
-      fillColor: [91, 33, 182],
+      fillColor: [accentR, accentG, accentB],
       textColor: [255, 255, 255],
       fontStyle: 'bold',
       fontSize: 8,
@@ -428,14 +442,14 @@ function drawSingleBulletinPage(
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(idx === 1 ? 10 : 8.5);
-    if (idx === 1) doc.setTextColor(91, 33, 182);
+    if (idx === 1) doc.setTextColor(accentR, accentG, accentB);
     else doc.setTextColor(24, 24, 27);
     doc.text(pdfText(val), marginX + boxWidth - 4, ry, { align: 'right' });
   });
 
   // Right: Conseil de classe
   const rx = marginX + boxWidth + boxGap;
-  doc.setFillColor(250, 249, 254);
+  doc.setFillColor(248, 250, 252);
   doc.setDrawColor(212, 212, 216);
   doc.roundedRect(rx, y, boxWidth, boxHeight, 2, 2, 'FD');
 
@@ -455,7 +469,7 @@ function drawSingleBulletinPage(
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
-  doc.setTextColor(91, 33, 182);
+  doc.setTextColor(accentR, accentG, accentB);
   doc.text(pdfText(`Décision : ${bulletin.decision}`), rx + 4, y + 20.5, {
     maxWidth: boxWidth - 8,
   });

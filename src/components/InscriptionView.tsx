@@ -246,7 +246,7 @@ export function InscriptionView({
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/90 border border-zinc-200 hover:border-violet-300 text-sm font-semibold text-zinc-700 hover:text-violet-700 transition-colors whitespace-nowrap shrink-0"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/90 border border-zinc-200 theme-border-accent-hover text-sm font-semibold text-zinc-700 theme-text-accent-hover transition-colors whitespace-nowrap shrink-0"
         >
           <ArrowLeft className="w-4 h-4" />
           Retour
@@ -260,7 +260,7 @@ export function InscriptionView({
           type="submit"
           form="inscription-form"
           disabled={saving}
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-sm font-semibold transition-all active:scale-[0.99] disabled:opacity-60 whitespace-nowrap shrink-0"
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl theme-btn-primary text-sm font-semibold transition-all active:scale-[0.99] disabled:opacity-60 whitespace-nowrap shrink-0"
         >
           <Check className="w-4 h-4" />
           <span>{saving ? 'Enregistrement...' : editingId ? 'Mettre à jour' : 'Entrer'}</span>
@@ -287,16 +287,16 @@ export function InscriptionView({
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-        className="bg-violet-50/90 backdrop-blur-xs border border-violet-300/80 rounded-2xl overflow-hidden shadow-xs"
+        className="theme-card-tinted backdrop-blur-xs border theme-border-soft rounded-2xl overflow-hidden shadow-xs"
       >
-        <div className="bg-gradient-to-r from-violet-900 via-violet-800 to-indigo-900 text-white px-6 py-4 flex items-center justify-between">
+        <div className="theme-surface-header border-b px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-white text-violet-800 flex items-center justify-center">
+            <div className="w-9 h-9 rounded-xl theme-nav-active flex items-center justify-center shadow-xs">
               <UserPlus className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white">Fiche d'identification de l'élève</h2>
-              <p className="text-xs text-violet-200">
+              <h2 className="text-base font-bold">Fiche d'identification de l'élève</h2>
+              <p className="text-xs theme-header-subtext">
                 Choisissez la division (ex: 6ème A, 6ème B) et liez l’email parent pour les notifications.
               </p>
             </div>
@@ -305,7 +305,7 @@ export function InscriptionView({
             <button
               type="button"
               onClick={() => resetForm(0)}
-              className="text-xs font-semibold text-white bg-white/15 px-3 py-1.5 rounded-lg hover:bg-white/25"
+              className="text-xs font-semibold theme-header-chip border px-3 py-1.5 rounded-lg"
             >
               Annuler la modification
             </button>
@@ -321,7 +321,7 @@ export function InscriptionView({
               value={nom}
               onChange={(e) => setNom(e.target.value)}
               placeholder="Ex : ADJAHO"
-              className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm uppercase transition-all"
+              className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 bg-white theme-input outline-none text-sm uppercase transition-all"
             />
           </div>
 
@@ -333,14 +333,14 @@ export function InscriptionView({
               value={prenoms}
               onChange={(e) => setPrenoms(e.target.value)}
               placeholder="Ex : Koffi Emmanuel"
-              className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm transition-all"
+              className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 bg-white theme-input outline-none text-sm transition-all"
             />
           </div>
 
-          <div className="bg-[#FAF9FE] border border-violet-100 rounded-xl p-4">
+          <div className="theme-bg-soft border theme-border-soft rounded-xl p-4">
             <div className="flex items-center justify-between mb-2">
               <label className="text-xs font-semibold text-zinc-700">Âge (Slidebar) *</label>
-              <span className="text-sm font-bold text-violet-700 font-mono-nums">
+              <span className="text-sm font-bold theme-text-accent font-mono-nums">
                 {age} ans
               </span>
             </div>
@@ -360,7 +360,7 @@ export function InscriptionView({
             </div>
           </div>
 
-          <div className="bg-[#FAF9FE] border border-violet-100 rounded-xl p-4 flex flex-col justify-between">
+          <div className="theme-bg-soft border theme-border-soft rounded-xl p-4 flex flex-col justify-between">
             <label className="block text-xs font-semibold text-zinc-700 mb-2">Sexe *</label>
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -368,8 +368,8 @@ export function InscriptionView({
                 onClick={() => setSexe('M')}
                 className={`py-2.5 px-4 rounded-xl text-sm font-semibold border transition-all ${
                   sexe === 'M'
-                    ? 'bg-violet-700 text-white border-violet-700'
-                    : 'bg-white text-zinc-700 border-zinc-200 hover:border-violet-300'
+                    ? 'theme-btn-primary border-transparent'
+                    : 'bg-white text-zinc-700 border-zinc-200 theme-border-accent-hover'
                 }`}
               >
                 Masculin (M)
@@ -379,8 +379,8 @@ export function InscriptionView({
                 onClick={() => setSexe('F')}
                 className={`py-2.5 px-4 rounded-xl text-sm font-semibold border transition-all ${
                   sexe === 'F'
-                    ? 'bg-violet-700 text-white border-violet-700'
-                    : 'bg-white text-zinc-700 border-zinc-200 hover:border-violet-300'
+                    ? 'theme-btn-primary border-transparent'
+                    : 'bg-white text-zinc-700 border-zinc-200 theme-border-accent-hover'
                 }`}
               >
                 Féminin (F)
@@ -398,8 +398,8 @@ export function InscriptionView({
                   onClick={() => handleCycleChange(c)}
                   className={`py-2 px-3 rounded-xl text-xs font-semibold border transition-all whitespace-nowrap ${
                     cycle === c
-                      ? 'bg-violet-700 text-white border-violet-700'
-                      : 'bg-white text-zinc-700 border-zinc-200 hover:border-violet-300'
+                      ? 'theme-btn-primary border-transparent'
+                      : 'bg-white text-zinc-700 border-zinc-200 theme-border-accent-hover'
                   }`}
                 >
                   {c}
@@ -413,7 +413,7 @@ export function InscriptionView({
             <select
               value={classe}
               onChange={(e) => setClasse(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 bg-white focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm font-medium transition-all"
+              className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 bg-white theme-input outline-none text-sm font-medium transition-all"
             >
               {classesByCycle[cycle].map((cl) => (
                 <option key={cl.name} value={cl.name}>
@@ -433,7 +433,7 @@ export function InscriptionView({
                 setMatriculeTouched(true);
                 setMatricule(e.target.value);
               }}
-              className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm font-mono-nums transition-all"
+              className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 bg-white theme-input outline-none text-sm font-mono-nums transition-all"
             />
           </div>
 
@@ -445,7 +445,7 @@ export function InscriptionView({
                 value={guardianName}
                 onChange={(e) => setGuardianName(e.target.value)}
                 placeholder="Parent / Tuteur"
-                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm transition-all"
+                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 bg-white theme-input outline-none text-sm transition-all"
               />
             </div>
             <div>
@@ -455,7 +455,7 @@ export function InscriptionView({
                 value={guardianPhone}
                 onChange={(e) => setGuardianPhone(e.target.value)}
                 placeholder="+228 90 12 34 56"
-                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm font-mono-nums transition-all"
+                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 bg-white theme-input outline-none text-sm font-mono-nums transition-all"
               />
             </div>
           </div>
@@ -469,7 +469,7 @@ export function InscriptionView({
               value={parentEmail}
               onChange={(e) => setParentEmail(e.target.value)}
               placeholder="90 12 34 56 ou parent@exemple.com"
-              className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm transition-all"
+              className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 bg-white theme-input outline-none text-sm transition-all"
             />
             {!parentEmail.trim() && guardianPhone.trim() && resolveIdentifierToAuthEmail(guardianPhone).authEmail && (
               <p className="mt-1.5 text-[11px] font-semibold text-emerald-700">
@@ -488,19 +488,19 @@ export function InscriptionView({
               value={studentEmail}
               onChange={(e) => setStudentEmail(e.target.value)}
               placeholder="90 00 00 00 ou eleve@exemple.com"
-              className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:border-violet-600 focus:ring-2 focus:ring-violet-100 outline-none text-sm transition-all"
+              className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 bg-white theme-input outline-none text-sm transition-all"
             />
           </div>
         </div>
       </motion.form>
 
-      <div className="bg-white/95 backdrop-blur-xs border border-violet-300/80 rounded-2xl overflow-hidden shadow-xs">
-        <div className="p-5 border-b border-violet-200 bg-violet-100/75 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="bg-white/95 backdrop-blur-xs border theme-border-soft rounded-2xl overflow-hidden shadow-xs">
+        <div className="p-5 border-b theme-table-head flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-bold text-violet-950">
+            <h3 className="text-sm font-bold theme-text-ink">
               Registre général des élèves ({filteredStudents.length})
             </h3>
-            <p className="text-xs text-violet-700">
+            <p className="text-xs theme-text-accent">
               Trié automatiquement par ordre alphabétique
             </p>
           </div>
@@ -512,7 +512,7 @@ export function InscriptionView({
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Rechercher nom, classe, matricule..."
-              className="w-full pl-9 pr-3 py-2 rounded-xl border border-zinc-200 text-xs focus:border-violet-600 outline-none"
+              className="w-full pl-9 pr-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs theme-input outline-none"
             />
           </div>
         </div>
@@ -538,7 +538,7 @@ export function InscriptionView({
               </thead>
               <tbody className="divide-y divide-zinc-100 text-sm">
                 {filteredStudents.map((s) => (
-                  <tr key={s.id} className="hover:bg-violet-50/30 transition-colors">
+                  <tr key={s.id} className="hover:bg-zinc-50/70 transition-colors">
                     <td className="py-2.5 px-4 font-mono-nums text-xs text-zinc-500">{s.matricule}</td>
                     <td className="py-2.5 px-4 font-semibold text-zinc-900">{s.nom}</td>
                     <td className="py-2.5 px-4 text-zinc-700">{s.prenoms}</td>
@@ -548,7 +548,7 @@ export function InscriptionView({
                       <button
                         type="button"
                         onClick={() => onSelectClass(s.classe)}
-                        className="text-xs font-semibold text-violet-700 hover:underline"
+                        className="text-xs font-semibold theme-text-accent hover:underline"
                       >
                         {s.classe}
                       </button>
@@ -560,7 +560,7 @@ export function InscriptionView({
                         {s.guardianPhone ? ` · ${s.guardianPhone}` : ''}
                       </div>
                       {s.parentEmail && (
-                        <div className="text-[11px] text-violet-700">
+                        <div className="text-[11px] theme-text-accent">
                           Parent : {formatAuthIdentifierForDisplay(s.parentEmail)}
                         </div>
                       )}
@@ -576,7 +576,7 @@ export function InscriptionView({
                           type="button"
                           onClick={() => handleEdit(s)}
                           title="Modifier"
-                          className="p-1.5 rounded-lg text-zinc-500 hover:text-violet-700 hover:bg-violet-50 transition-colors"
+                          className="p-1.5 rounded-lg text-zinc-500 theme-text-accent-hover theme-bg-soft-hover transition-colors"
                         >
                           <Pencil className="w-3.5 h-3.5" />
                         </button>

@@ -272,14 +272,14 @@ function AdminDashboard({
           title: 'Archives annuelles',
           subtitle: 'Consulter les listes et résultats archivés des années précédentes',
           icon: Archive,
-          accent: 'bg-indigo-100 text-indigo-800',
+          accent: 'theme-pill-soft border',
         },
         {
           id: 'messages' as ActiveTab,
           title: 'Messagerie équipe & direction',
           subtitle: `${messages.length} échange(s) · ${unreadMessages} non lu(s) avec Directeur, Censeur & Profs`,
           icon: MessageSquare,
-          accent: 'bg-indigo-100 text-indigo-800',
+          accent: 'theme-pill-soft border',
         },
         {
           id: 'notifications' as ActiveTab,
@@ -326,7 +326,7 @@ function AdminDashboard({
           title: 'Messagerie sécurisée',
           subtitle: `${messages.length} échange(s) · ${unreadMessages} non lu(s) avec tout l’établissement`,
           icon: MessageSquare,
-          accent: 'bg-indigo-100 text-indigo-800',
+          accent: 'theme-pill-soft border',
         },
         {
           id: 'notifications' as ActiveTab,
@@ -372,14 +372,14 @@ function AdminDashboard({
         title: 'Journaux & Sécurité',
         subtitle: 'Traçabilité des actions, rôles et verrouillage élèves',
         icon: Shield,
-        accent: 'bg-indigo-100 text-indigo-800',
+        accent: 'theme-pill-soft border',
       },
       {
         id: 'messages' as ActiveTab,
         title: 'Messagerie sécurisée',
         subtitle: `${messages.length} échange(s) · ${unreadMessages} non lu(s) avec tout l’établissement`,
         icon: MessageSquare,
-        accent: 'bg-indigo-100 text-indigo-800',
+        accent: 'theme-pill-soft border',
       },
       {
         id: 'notifications' as ActiveTab,
@@ -477,12 +477,12 @@ function AdminDashboard({
           </div>
         </div>
 
-        <div className="bg-gradient-to-br from-white/95 to-indigo-50/75 backdrop-blur-xs border border-indigo-200/80 rounded-2xl overflow-hidden shadow-xs">
-          <div className="h-1.5 bg-gradient-to-r from-indigo-600 to-blue-600" />
+        <div className="bg-gradient-to-br from-white/95 to-sky-50/75 backdrop-blur-xs border border-sky-200/80 rounded-2xl overflow-hidden shadow-xs">
+          <div className="h-1.5 bg-gradient-to-r from-sky-600 to-blue-600" />
           <div className="p-5">
-            <p className="text-xs text-indigo-800 font-semibold">Classes & divisions</p>
-            <p className="mt-2 text-2xl font-extrabold text-indigo-950 font-mono-nums">{activeClassCount}</p>
-            <p className="mt-1 text-xs text-indigo-700/80">
+            <p className="text-xs text-sky-800 font-semibold">Classes & divisions</p>
+            <p className="mt-2 text-2xl font-extrabold text-sky-950 font-mono-nums">{activeClassCount}</p>
+            <p className="mt-1 text-xs text-sky-700/80">
               {titulaireAssignedCount}/{activeClassCount} avec titulaire
             </p>
           </div>
@@ -532,8 +532,8 @@ function AdminDashboard({
         </div>
       </div>
 
-      {/* AI Assistant Strip (Censeur uniquement dans cet espace) */}
-      {isCenseur && (
+      {/* AI Assistant Strip (Directeur, Censeur & Secrétaire — bloqué pour Parents & Professeurs) */}
+      {(isDirector || isCenseur || isSecretaire) && (
         <div className="theme-surface-header border rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
           <div className="flex items-center gap-3.5">
             <div className="w-10 h-10 rounded-xl theme-header-chip border flex items-center justify-center shrink-0">
@@ -659,14 +659,14 @@ function TeacherDashboard({
 
       {/* Teacher KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-gradient-to-br from-white/95 to-indigo-100/80 backdrop-blur-xs border border-indigo-300/80 rounded-2xl overflow-hidden">
-          <div className="h-1.5 bg-gradient-to-r from-indigo-600 to-blue-700" />
+        <div className="bg-gradient-to-br from-white/95 to-sky-50/85 backdrop-blur-xs border border-sky-200/80 rounded-2xl overflow-hidden">
+          <div className="h-1.5 bg-gradient-to-r from-sky-600 to-blue-700" />
           <div className="p-5">
-            <p className="text-xs text-indigo-800 font-semibold">Mes classes assignées</p>
-            <p className="mt-2 text-2xl font-extrabold text-indigo-950 font-mono-nums">
+            <p className="text-xs text-sky-800 font-semibold">Mes classes assignées</p>
+            <p className="mt-2 text-2xl font-extrabold text-sky-950 font-mono-nums">
               {effectiveClassNames.length}
             </p>
-            <p className="mt-1 text-xs text-indigo-700/80 truncate">{effectiveClassNames.join(', ') || 'Toutes'}</p>
+            <p className="mt-1 text-xs text-sky-700/80 truncate">{effectiveClassNames.join(', ') || 'Toutes'}</p>
           </div>
         </div>
 
@@ -739,17 +739,17 @@ function TeacherDashboard({
                         >
                           {clsName.slice(0, 3)}
                         </span>
-                        <h3 className="text-base font-extrabold text-zinc-900 group-hover:text-violet-800 truncate">
+                        <h3 className="text-base font-extrabold text-zinc-900 group-hover:text-[var(--theme-accent-text)] truncate">
                           {clsName}
                         </h3>
                         {isTeacherTitulaire(clsObj, teacherRecord) && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-violet-700 text-white text-[10px] font-bold shrink-0">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md theme-btn-primary text-[10px] font-bold shrink-0">
                             <UserCheck className="w-3 h-3" />
                             Titulaire
                           </span>
                         )}
                       </div>
-                      <ArrowUpRight className="w-4 h-4 text-zinc-400 group-hover:text-violet-700 shrink-0" />
+                      <ArrowUpRight className="w-4 h-4 text-zinc-400 group-hover:text-[var(--theme-accent-text)] shrink-0" />
                     </div>
                     <p className="text-xs text-zinc-600 mt-2 truncate">{theme.series || theme.badgeLabel}</p>
                     <div className="mt-4 pt-3 border-t border-black/10 flex items-center justify-between text-xs font-mono-nums">
@@ -1110,7 +1110,7 @@ function ParentDashboard({
                     ? 'bg-emerald-50 text-emerald-700'
                     : n.type === 'absence'
                     ? 'bg-amber-50 text-amber-700'
-                    : 'bg-violet-50 text-violet-700'
+                    : 'theme-pill-soft border'
                 }`}
               >
                 {n.type === 'grade' ? (
@@ -1129,7 +1129,7 @@ function ParentDashboard({
                       <button
                         type="button"
                         onClick={() => void markNotificationRead(n.id)}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-900 hover:bg-violet-800 text-white text-[10px] font-semibold"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white text-[10px] font-semibold"
                       >
                         <Check className="w-3 h-3" />
                         Vu
@@ -1396,9 +1396,9 @@ export function RoleManagementView({
   };
 
   const roleBadge = (r: MembershipRole) => {
-    if (r === 'censeur') return { label: 'Censeur · Pédagogie', cls: 'bg-purple-100 text-purple-800 border border-purple-200' };
+    if (r === 'censeur') return { label: 'Censeur · Pédagogie', cls: 'theme-pill-soft border' };
     if (r === 'secretaire') return { label: 'Secrétaire · Listes', cls: 'bg-amber-100 text-amber-800 border border-amber-200' };
-    if (r === 'teacher') return { label: 'Enseignant', cls: 'bg-indigo-50 text-indigo-700' };
+    if (r === 'teacher') return { label: 'Enseignant', cls: 'bg-sky-50 text-sky-700 border border-sky-200' };
     return { label: 'Parent', cls: 'bg-emerald-50 text-emerald-700' };
   };
 
@@ -1444,7 +1444,7 @@ export function RoleManagementView({
               onClick={() => setRole('censeur')}
               className={`px-4 py-2 rounded-xl text-xs font-semibold border transition-all ${
                 role === 'censeur'
-                  ? 'bg-purple-700 text-white border-purple-700'
+                  ? 'theme-btn-primary border-transparent'
                   : 'bg-white text-zinc-700 border-zinc-200'
               }`}
             >
@@ -1523,7 +1523,7 @@ export function RoleManagementView({
                   ? 'Ex : Prof. Houngbédji'
                   : 'Ex : M. Adjaho Komlan'
               }
-              className="w-full px-3.5 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none focus:border-violet-600"
+              className="w-full px-3.5 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none theme-input"
             />
           </div>
           <div>
@@ -1534,7 +1534,7 @@ export function RoleManagementView({
               value={memberEmail}
               onChange={(e) => setMemberEmail(e.target.value)}
               placeholder="90 12 34 56 ou compte@exemple.com"
-              className="w-full px-3.5 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none focus:border-violet-600"
+              className="w-full px-3.5 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none theme-input"
             />
           </div>
           {role === 'teacher' && (
@@ -1545,7 +1545,7 @@ export function RoleManagementView({
                 value={assignedSubject}
                 onChange={(e) => setAssignedSubject(e.target.value)}
                 placeholder="Ex : Maths & Physique"
-                className="w-full px-3.5 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none focus:border-violet-600"
+                className="w-full px-3.5 py-2 rounded-xl border border-zinc-200 bg-white text-xs outline-none theme-input"
               />
             </div>
           )}
@@ -1595,7 +1595,7 @@ export function RoleManagementView({
                       onClick={() => toggleTitulaireClass(c.name)}
                       className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
                         isTit
-                          ? 'bg-indigo-700 text-white border-indigo-700'
+                          ? 'theme-btn-primary border-transparent'
                           : 'bg-zinc-50 text-zinc-700 border-zinc-200 hover:border-zinc-400'
                       }`}
                     >

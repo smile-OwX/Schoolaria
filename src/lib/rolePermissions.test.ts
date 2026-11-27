@@ -38,7 +38,7 @@ import {
 
 const ALL_ROLES: RoleId[] = ['admin', 'censeur', 'secretaire', 'teacher', 'parent'];
 
-test('Directeur (admin) manages classes while staying isolated from Censeur grades and Secretaire enrollments', () => {
+test('Directeur (admin) manages classes & AI while staying isolated from Censeur grades and Secretaire enrollments', () => {
   const adminTabs = getAllowedTabsForRole('admin');
   assert.deepEqual(adminTabs, [
     'hub',
@@ -47,6 +47,7 @@ test('Directeur (admin) manages classes while staying isolated from Censeur grad
     'stats',
     'archives',
     'audit',
+    'assistant',
     'messages',
     'notifications',
     'settings',
@@ -55,11 +56,11 @@ test('Directeur (admin) manages classes while staying isolated from Censeur grad
     'inscription',
     'classdetail',
     'bulletins',
-    'assistant',
   ];
   for (const tab of forbiddenForAdmin) {
     assert.equal(canAccessTab('admin', tab), false, `admin must not access ${tab}`);
   }
+  assert.equal(canAccessTab('admin', 'assistant'), true);
   assert.equal(canManageLeadershipForRole('admin'), true);
   assert.equal(canManageYearLifecycleForRole('admin'), true);
   assert.equal(canChangeSchoolThemeForRole('admin'), true);
@@ -92,13 +93,13 @@ test('Censeur has no access to Secretaire enrollment panel or Directeur governan
   assert.equal(canChangeSchoolThemeForRole('censeur'), false);
 });
 
-test('Secretaire owns inscriptions and class creation without grade editing or admin governance', () => {
+test('Secretaire owns inscriptions, class creation and AI without grade editing or admin governance', () => {
   assert.equal(canAccessTab('secretaire', 'inscription'), true);
   assert.equal(canAccessTab('secretaire', 'makelist'), true);
   assert.equal(canAccessTab('secretaire', 'classdetail'), true);
   assert.equal(canAccessTab('secretaire', 'bulletins'), true);
+  assert.equal(canAccessTab('secretaire', 'assistant'), true);
   assert.equal(canAccessTab('secretaire', 'roles'), false);
-  assert.equal(canAccessTab('secretaire', 'assistant'), false);
   assert.equal(canAccessTab('secretaire', 'audit'), false);
   assert.equal(canAccessTab('secretaire', 'settings'), false);
 
@@ -109,13 +110,12 @@ test('Secretaire owns inscriptions and class creation without grade editing or a
   assert.equal(canBatchPrintBulletinsForRole('secretaire'), true);
 });
 
-test('Teacher and Parent remain strictly isolated to their dedicated panels', () => {
+test('Teacher and Parent remain strictly isolated and are the only roles without AI access', () => {
   assert.deepEqual(getAllowedTabsForRole('teacher'), [
     'hub',
     'makelist',
     'classdetail',
     'bulletins',
-    'assistant',
     'messages',
     'notifications',
   ]);
@@ -125,6 +125,11 @@ test('Teacher and Parent remain strictly isolated to their dedicated panels', ()
     'messages',
     'notifications',
   ]);
+  assert.equal(canAccessTab('admin', 'assistant'), true);
+  assert.equal(canAccessTab('censeur', 'assistant'), true);
+  assert.equal(canAccessTab('secretaire', 'assistant'), true);
+  assert.equal(canAccessTab('teacher', 'assistant'), false);
+  assert.equal(canAccessTab('parent', 'assistant'), false);
   assert.equal(canEditGradesForRole('teacher'), true);
   assert.equal(canEditGradesForRole('parent'), false);
   assert.equal(canManageStudentsForRole('teacher'), false);

@@ -147,6 +147,10 @@ export function applySchoolThemeToDocument(theme?: string | null): SchoolUniform
   const normalized = normalizeSchoolTheme(theme);
   if (typeof document !== 'undefined') {
     document.documentElement.setAttribute('data-school-theme', normalized);
+    const metaTheme = document.querySelector('meta[name="theme-color"]');
+    if (metaTheme) {
+      metaTheme.setAttribute('content', getSchoolThemeDefinition(normalized).accentHex);
+    }
   }
   return normalized;
 }

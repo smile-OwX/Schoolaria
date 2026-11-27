@@ -81,7 +81,15 @@ service cloud.firestore {
     function isCenseurInSchool(schoolId) {
       return isValidId(schoolId)
         && !isStudentLockedInSchool(schoolId)
-        && exists(/databases/$(database)/documents/memberships/$(('mem_' + schoolId + '_censeur_' + safeEmailKey(authEmail()))));
+        && (
+          exists(/databases/$(database)/documents/memberships/$(('mem_' + schoolId + '_censeur_' + safeEmailKey(authEmail())))) ||
+          (
+            exists(/databases/$(database)/documents/schools/$(schoolId)) &&
+            'censeurEmails' in schoolDoc(schoolId) &&
+            schoolDoc(schoolId).censeurEmails is list &&
+            authEmail() in schoolDoc(schoolId).censeurEmails
+          )
+        );
     }
 
     function isSecretaireInSchool(schoolId) {
@@ -144,7 +152,7 @@ service cloud.firestore {
       return email is string
         && email.size() >= 3
         && (
-          ('censeurEmails' in sch && email in sch.censeurEmails) ||
+          ('censeurEmails' in sch && email.lower() in sch.censeurEmails) ||
           exists(/databases/$(database)/documents/memberships/$(('mem_' + schoolId + '_censeur_' + safeEmailKey(email))))
         );
     }
@@ -153,9 +161,10 @@ service cloud.firestore {
       let sch = schoolDoc(schoolId);
       return email is string
         && email.size() >= 3
-        && 'ownerEmail' in sch
-        && sch.ownerEmail is string
-        && sch.ownerEmail == email;
+        && (
+          ('ownerEmail' in sch && sch.ownerEmail is string && sch.ownerEmail.size() >= 3 && sch.ownerEmail.lower() == email.lower()) ||
+          ('email' in sch && sch.email is string && sch.email.size() >= 3 && sch.email.lower() == email.lower())
+        );
     }
 
     function isRecipientTeacherInSchool(schoolId, email) {
@@ -163,16 +172,29 @@ service cloud.firestore {
       return email is string
         && email.size() >= 3
         && (
-          ('teacherEmails' in sch && email in sch.teacherEmails) ||
+          ('teacherEmails' in sch && email.lower() in sch.teacherEmails) ||
           exists(/databases/$(database)/documents/memberships/$(('mem_' + schoolId + '_teacher_' + safeEmailKey(email))))
         );
     }
 
+    function isLeadershipRecipient(schoolId, email) {
+      return isRecipientCenseurInSchool(schoolId, email) || isRecipientDirectorInSchool(schoolId, email);
+    }
+
+    function isSecretaireRecipient(schoolId, email) {
+      return isLeadershipRecipient(schoolId, email) || isRecipientTeacherInSchool(schoolId, email);
+    }
+
     function allowedLeadershipEmails(schoolId) {
       let sch = schoolDoc(schoolId);
-      let dirs = ('ownerEmail' in sch && sch.ownerEmail is string && sch.ownerEmail.size() >= 3) ? [sch.ownerEmail] : [];
+      let ownerDir = ('ownerEmail' in sch && sch.ownerEmail is string && sch.ownerEmail.size() >= 3)
+        ? [sch.ownerEmail.lower()]
+        : [];
+      let schoolDir = ('email' in sch && sch.email is string && sch.email.size() >= 3)
+        ? [sch.email.lower()]
+        : [];
       let cens = ('censeurEmails' in sch && sch.censeurEmails is list) ? sch.censeurEmails : [];
-      return dirs.concat(cens);
+      return ownerDir.concat(schoolDir).concat(cens);
     }
 
     function allowedSecretaireTargetEmails(schoolId) {
@@ -186,7 +208,19 @@ service cloud.firestore {
       let cens = ('censeurEmails' in sch && sch.censeurEmails is list) ? sch.censeurEmails : [];
       return audience.size() >= 1 && (
         (cens.size() > 0 && audience.hasOnly(cens)) ||
-        (audience.size() == 1 && isRecipientCenseurInSchool(schoolId, audience[0]))
+        (
+          audience.size() <= 10 &&
+          isRecipientCenseurInSchool(schoolId, audience[0]) &&
+          (audience.size() < 2 || isRecipientCenseurInSchool(schoolId, audience[1])) &&
+          (audience.size() < 3 || isRecipientCenseurInSchool(schoolId, audience[2])) &&
+          (audience.size() < 4 || isRecipientCenseurInSchool(schoolId, audience[3])) &&
+          (audience.size() < 5 || isRecipientCenseurInSchool(schoolId, audience[4])) &&
+          (audience.size() < 6 || isRecipientCenseurInSchool(schoolId, audience[5])) &&
+          (audience.size() < 7 || isRecipientCenseurInSchool(schoolId, audience[6])) &&
+          (audience.size() < 8 || isRecipientCenseurInSchool(schoolId, audience[7])) &&
+          (audience.size() < 9 || isRecipientCenseurInSchool(schoolId, audience[8])) &&
+          (audience.size() < 10 || isRecipientCenseurInSchool(schoolId, audience[9]))
+        )
       );
     }
 
@@ -194,7 +228,19 @@ service cloud.firestore {
       let allowed = allowedLeadershipEmails(schoolId);
       return audience.size() >= 1 && (
         (allowed.size() > 0 && audience.hasOnly(allowed)) ||
-        (audience.size() == 1 && (isRecipientCenseurInSchool(schoolId, audience[0]) || isRecipientDirectorInSchool(schoolId, audience[0])))
+        (
+          audience.size() <= 10 &&
+          isLeadershipRecipient(schoolId, audience[0]) &&
+          (audience.size() < 2 || isLeadershipRecipient(schoolId, audience[1])) &&
+          (audience.size() < 3 || isLeadershipRecipient(schoolId, audience[2])) &&
+          (audience.size() < 4 || isLeadershipRecipient(schoolId, audience[3])) &&
+          (audience.size() < 5 || isLeadershipRecipient(schoolId, audience[4])) &&
+          (audience.size() < 6 || isLeadershipRecipient(schoolId, audience[5])) &&
+          (audience.size() < 7 || isLeadershipRecipient(schoolId, audience[6])) &&
+          (audience.size() < 8 || isLeadershipRecipient(schoolId, audience[7])) &&
+          (audience.size() < 9 || isLeadershipRecipient(schoolId, audience[8])) &&
+          (audience.size() < 10 || isLeadershipRecipient(schoolId, audience[9]))
+        )
       );
     }
 
@@ -202,11 +248,19 @@ service cloud.firestore {
       let allowed = allowedSecretaireTargetEmails(schoolId);
       return audience.size() >= 1 && (
         (allowed.size() > 0 && audience.hasOnly(allowed)) ||
-        (audience.size() == 1 && (
-          isRecipientCenseurInSchool(schoolId, audience[0]) ||
-          isRecipientDirectorInSchool(schoolId, audience[0]) ||
-          isRecipientTeacherInSchool(schoolId, audience[0])
-        ))
+        (
+          audience.size() <= 10 &&
+          isSecretaireRecipient(schoolId, audience[0]) &&
+          (audience.size() < 2 || isSecretaireRecipient(schoolId, audience[1])) &&
+          (audience.size() < 3 || isSecretaireRecipient(schoolId, audience[2])) &&
+          (audience.size() < 4 || isSecretaireRecipient(schoolId, audience[3])) &&
+          (audience.size() < 5 || isSecretaireRecipient(schoolId, audience[4])) &&
+          (audience.size() < 6 || isSecretaireRecipient(schoolId, audience[5])) &&
+          (audience.size() < 7 || isSecretaireRecipient(schoolId, audience[6])) &&
+          (audience.size() < 8 || isSecretaireRecipient(schoolId, audience[7])) &&
+          (audience.size() < 9 || isSecretaireRecipient(schoolId, audience[8])) &&
+          (audience.size() < 10 || isSecretaireRecipient(schoolId, audience[9]))
+        )
       );
     }
 
@@ -234,21 +288,28 @@ service cloud.firestore {
     }
 
     function canWriteInSchool(schoolId, docOwnerId) {
+      let sch = schoolDoc(schoolId);
       return schoolBelongsToOwner(schoolId, docOwnerId) && (
-        schoolDoc(schoolId).ownerId == request.auth.uid ||
-        ('memberEmails' in schoolDoc(schoolId) && authEmail() in schoolDoc(schoolId).memberEmails) ||
+        sch.ownerId == request.auth.uid ||
+        ('memberEmails' in sch && authEmail() in sch.memberEmails) ||
+        ('censeurEmails' in sch && authEmail() in sch.censeurEmails) ||
+        ('teacherEmails' in sch && authEmail() in sch.teacherEmails) ||
+        ('staffEmails' in sch && authEmail() in sch.staffEmails) ||
         isMemberByDocId(schoolId)
       );
     }
 
     function canStaffWriteInSchool(schoolId, docOwnerId) {
+      let sch = schoolDoc(schoolId);
       return schoolBelongsToOwner(schoolId, docOwnerId) && (
-        schoolDoc(schoolId).ownerId == request.auth.uid ||
+        sch.ownerId == request.auth.uid ||
         isCenseurInSchool(schoolId) ||
         isSecretaireInSchool(schoolId) ||
         (
           !isStudentLockedInSchool(schoolId) && (
-            ('staffEmails' in schoolDoc(schoolId) && authEmail() in schoolDoc(schoolId).staffEmails) ||
+            ('staffEmails' in sch && authEmail() in sch.staffEmails) ||
+            ('teacherEmails' in sch && authEmail() in sch.teacherEmails) ||
+            ('censeurEmails' in sch && authEmail() in sch.censeurEmails) ||
             exists(/databases/$(database)/documents/memberships/$(('mem_' + schoolId + '_teacher_' + safeEmailKey(authEmail()))))
           )
         )
@@ -935,13 +996,11 @@ service cloud.firestore {
         && (
           (
             incoming().senderRole == 'parent' &&
-            !isManagementInSchool(incoming().schoolId) &&
             isRecipientCenseurInSchool(incoming().schoolId, incoming().recipientEmail)
           ) ||
           (
             incoming().senderRole == 'teacher' &&
             canStaffWriteInSchool(incoming().schoolId, incoming().ownerId) &&
-            !isManagementInSchool(incoming().schoolId) &&
             (
               isRecipientCenseurInSchool(incoming().schoolId, incoming().recipientEmail) ||
               isRecipientDirectorInSchool(incoming().schoolId, incoming().recipientEmail)
@@ -1022,13 +1081,11 @@ service cloud.firestore {
           (
             incoming().createdByRole == 'teacher' &&
             canStaffWriteInSchool(incoming().schoolId, incoming().ownerId) &&
-            !isManagementInSchool(incoming().schoolId) &&
             audienceOnlyLeadershipTargets(incoming().schoolId, incoming().audienceEmails)
           ) ||
           (
             incoming().createdByRole == 'parent' &&
             canWriteInSchool(incoming().schoolId, incoming().ownerId) &&
-            !isManagementInSchool(incoming().schoolId) &&
             audienceOnlyCenseurTargets(incoming().schoolId, incoming().audienceEmails)
           )
         );

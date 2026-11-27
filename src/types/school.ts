@@ -422,6 +422,7 @@ export function getNextProgressionTarget(
 export interface ClassroomThemeInfo {
   motif: ClassroomMotif;
   accentColor: string;
+  usesSchoolTheme: boolean;
   series: string;
   slogan: string;
   symbols: string[];
@@ -430,69 +431,51 @@ export interface ClassroomThemeInfo {
   surfaceTintClass: string;
 }
 
+const SCHOOL_THEME_DELEGATED_HEXES = new Set([
+  '#6d28d9',
+  '#7c3aed',
+  '#5b21b6',
+  '#4338ca',
+  '#4f46e5',
+  '#9333ea',
+  '#a21caf',
+]);
+
 const COLOR_STYLES_BY_HEX: Record<string, { gradientClass: string; surfaceTintClass: string }> = {
   '#059669': {
-    gradientClass: 'from-emerald-600 via-teal-600 to-violet-700',
+    gradientClass: 'from-emerald-600 via-teal-600 to-emerald-700',
     surfaceTintClass: 'bg-emerald-50/90 border-emerald-300/80 hover:border-emerald-500',
   },
   '#047857': {
-    gradientClass: 'from-emerald-600 via-teal-700 to-indigo-800',
+    gradientClass: 'from-emerald-600 via-teal-700 to-emerald-800',
     surfaceTintClass: 'bg-emerald-50/90 border-emerald-300/80 hover:border-emerald-500',
   },
   '#0f766e': {
-    gradientClass: 'from-teal-600 via-emerald-700 to-violet-800',
+    gradientClass: 'from-teal-600 via-emerald-700 to-teal-800',
     surfaceTintClass: 'bg-teal-50/90 border-teal-300/80 hover:border-teal-500',
   },
   '#0284c7': {
-    gradientClass: 'from-sky-600 via-blue-600 to-violet-700',
+    gradientClass: 'from-sky-600 via-blue-600 to-sky-700',
     surfaceTintClass: 'bg-sky-50/90 border-sky-300/80 hover:border-sky-500',
   },
   '#0369a1': {
-    gradientClass: 'from-sky-600 via-cyan-700 to-indigo-800',
+    gradientClass: 'from-sky-600 via-cyan-700 to-blue-800',
     surfaceTintClass: 'bg-sky-50/90 border-sky-300/80 hover:border-sky-500',
   },
-  '#4f46e5': {
-    gradientClass: 'from-indigo-600 via-violet-600 to-purple-800',
-    surfaceTintClass: 'bg-indigo-50/90 border-indigo-300/80 hover:border-indigo-500',
-  },
-  '#4338ca': {
-    gradientClass: 'from-indigo-700 via-blue-700 to-violet-900',
-    surfaceTintClass: 'bg-indigo-50/90 border-indigo-300/80 hover:border-indigo-500',
-  },
-  '#7c3aed': {
-    gradientClass: 'from-violet-600 via-purple-600 to-indigo-700',
-    surfaceTintClass: 'bg-violet-100/80 border-violet-300/85 hover:border-violet-500',
-  },
-  '#6d28d9': {
-    gradientClass: 'from-violet-700 via-purple-700 to-indigo-800',
-    surfaceTintClass: 'bg-violet-100/80 border-violet-300/85 hover:border-violet-500',
-  },
-  '#5b21b6': {
-    gradientClass: 'from-violet-800 via-indigo-800 to-purple-950',
-    surfaceTintClass: 'bg-violet-100/85 border-violet-300/90 hover:border-violet-600',
-  },
-  '#9333ea': {
-    gradientClass: 'from-purple-600 via-fuchsia-600 to-violet-800',
-    surfaceTintClass: 'bg-purple-100/80 border-purple-300/85 hover:border-purple-500',
-  },
-  '#a21caf': {
-    gradientClass: 'from-fuchsia-700 via-purple-700 to-violet-800',
-    surfaceTintClass: 'bg-fuchsia-50/90 border-fuchsia-300/80 hover:border-fuchsia-500',
-  },
   '#d97706': {
-    gradientClass: 'from-amber-500 via-orange-600 to-violet-700',
+    gradientClass: 'from-amber-500 via-orange-600 to-amber-700',
     surfaceTintClass: 'bg-amber-50/90 border-amber-300/80 hover:border-amber-500',
   },
   '#b45309': {
-    gradientClass: 'from-amber-600 via-rose-600 to-violet-700',
+    gradientClass: 'from-amber-600 via-orange-600 to-amber-700',
     surfaceTintClass: 'bg-amber-50/90 border-amber-300/80 hover:border-amber-500',
   },
   '#be123c': {
-    gradientClass: 'from-rose-600 via-pink-700 to-violet-800',
+    gradientClass: 'from-rose-600 via-pink-700 to-rose-800',
     surfaceTintClass: 'bg-rose-50/90 border-rose-300/80 hover:border-rose-500',
   },
   '#9f1239': {
-    gradientClass: 'from-rose-700 via-fuchsia-800 to-violet-900',
+    gradientClass: 'from-rose-700 via-pink-800 to-rose-900',
     surfaceTintClass: 'bg-rose-50/90 border-rose-300/80 hover:border-rose-500',
   },
 };
@@ -509,57 +492,67 @@ export function getClassroomTheme(classe: string, classroom?: Classroom): Classr
         : 'maths-physique'
       : 'general');
 
-  const accentColor = classroom?.accentColor ?? preset?.accentColor ?? '#6d28d9';
+  const rawAccent = classroom?.accentColor ?? preset?.accentColor ?? '#6d28d9';
+  const normalizedHex = rawAccent.trim().toLowerCase();
+  const colorLook = COLOR_STYLES_BY_HEX[normalizedHex];
+  const usesSchoolTheme = !colorLook || SCHOOL_THEME_DELEGATED_HEXES.has(normalizedHex);
+  const accentColor = usesSchoolTheme ? 'var(--theme-accent)' : rawAccent;
   const series = classroom?.series || preset?.series || '';
   const slogan = classroom?.slogan || preset?.slogan || '';
-  const colorLook = COLOR_STYLES_BY_HEX[accentColor.toLowerCase()];
+
+  const schoolGradient = 'from-[var(--theme-accent)] to-[var(--theme-accent-hover)]';
+  const schoolSurfaceTint = 'theme-card-tinted theme-border-soft theme-border-accent-hover';
 
   if (motif === 'lettres-philo') {
     return {
       motif,
       accentColor,
+      usesSchoolTheme,
       series: series || 'Lettres & Culture',
       slogan: slogan || '« Penser par soi-même et maîtriser le discours »',
       symbols: ['Φ', 'Ψ', 'Logos', 'A4'],
       badgeLabel: cycle === 'Collège' ? 'Lettres & Langues' : 'Lettres & Philo',
-      gradientClass: colorLook?.gradientClass ?? 'from-amber-600 via-rose-600 to-violet-700',
-      surfaceTintClass: colorLook?.surfaceTintClass ?? 'bg-amber-50/90 border-amber-300/80 hover:border-amber-500',
+      gradientClass: usesSchoolTheme ? schoolGradient : colorLook.gradientClass,
+      surfaceTintClass: usesSchoolTheme ? schoolSurfaceTint : colorLook.surfaceTintClass,
     };
   }
   if (motif === 'sciences-nat') {
     return {
       motif,
       accentColor,
+      usesSchoolTheme,
       series: series || 'Sciences Naturelles & SVT',
       slogan: slogan || '« Comprendre le vivant et la matière »',
       symbols: ['ADN', 'O₂', 'ΔG', 'ATP'],
       badgeLabel: 'Sciences & SVT',
-      gradientClass: colorLook?.gradientClass ?? 'from-emerald-600 via-teal-600 to-indigo-700',
-      surfaceTintClass: colorLook?.surfaceTintClass ?? 'bg-emerald-50/90 border-emerald-300/80 hover:border-emerald-500',
+      gradientClass: usesSchoolTheme ? schoolGradient : colorLook.gradientClass,
+      surfaceTintClass: usesSchoolTheme ? schoolSurfaceTint : colorLook.surfaceTintClass,
     };
   }
   if (motif === 'maths-physique') {
     return {
       motif,
       accentColor,
+      usesSchoolTheme,
       series: series || 'Maths & Sciences Physiques',
       slogan: slogan || '« E = mc² · L’exactitude au service de l’excellence »',
       symbols: ['∑', '∫', 'E=mc²', 'Δ'],
       badgeLabel: 'Maths & Physique',
-      gradientClass: colorLook?.gradientClass ?? 'from-indigo-700 via-violet-700 to-purple-800',
-      surfaceTintClass: colorLook?.surfaceTintClass ?? 'bg-indigo-50/90 border-indigo-300/80 hover:border-indigo-500',
+      gradientClass: usesSchoolTheme ? schoolGradient : colorLook.gradientClass,
+      surfaceTintClass: usesSchoolTheme ? schoolSurfaceTint : colorLook.surfaceTintClass,
     };
   }
 
   return {
     motif,
     accentColor,
+    usesSchoolTheme,
     series: series || `${cycle} · Programme officiel`,
     slogan: slogan || 'Discipline · Travail · Réussite collective',
     symbols: ['π', '∑', '√x'],
     badgeLabel: 'Section Collège',
-    gradientClass: colorLook?.gradientClass ?? 'from-violet-700 via-purple-700 to-indigo-800',
-    surfaceTintClass: colorLook?.surfaceTintClass ?? 'bg-violet-100/80 border-violet-300/85 hover:border-violet-500',
+    gradientClass: usesSchoolTheme ? schoolGradient : colorLook.gradientClass,
+    surfaceTintClass: usesSchoolTheme ? schoolSurfaceTint : colorLook.surfaceTintClass,
   };
 }
 

@@ -21,7 +21,8 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   const origin = req.headers.origin;
-  if (isAllowedCorsOrigin(origin, process.env)) {
+  const hostHeader = typeof req.headers.host === 'string' ? req.headers.host : undefined;
+  if (isAllowedCorsOrigin(origin, process.env, hostHeader)) {
     res.setHeader('Access-Control-Allow-Origin', origin || '*');
     res.setHeader('Vary', 'Origin');
   }
@@ -34,17 +35,40 @@ app.use((req, res, next) => {
   return next();
 });
 
+app.use((req, _res, next) => {
+  const reqState = req as Request & { _body?: boolean; readableEnded?: boolean };
+  if (reqState.body !== undefined && reqState.readableEnded && !reqState._body) {
+    reqState._body = true;
+  }
+  next();
+});
+
 app.use(express.json({ limit: '15mb' }));
 
-// Load Firebase Project ID for ID Token verification
-let FIREBASE_PROJECT_ID = '';
-try {
-  const rawCfg = fs.readFileSync(path.resolve(__dirname, 'firebase-applet-config.json'), 'utf8');
-  const parsedCfg = JSON.parse(rawCfg) as { projectId?: string };
-  FIREBASE_PROJECT_ID = parsedCfg.projectId || '';
-} catch {
-  FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || '';
+function resolveFirebaseProjectId(): string {
+  const fromEnv = (process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || '').trim();
+  if (fromEnv) return fromEnv;
+  const candidatePaths = [
+    path.resolve(__dirname, 'firebase-applet-config.json'),
+    path.resolve(__dirname, '..', 'firebase-applet-config.json'),
+    path.resolve(process.cwd(), 'firebase-applet-config.json'),
+  ];
+  for (const candidatePath of candidatePaths) {
+    try {
+      const rawCfg = fs.readFileSync(candidatePath, 'utf8');
+      const parsedCfg = JSON.parse(rawCfg) as { projectId?: string };
+      if (parsedCfg.projectId) {
+        return parsedCfg.projectId;
+      }
+    } catch {
+      // Try next candidate path
+    }
+  }
+  return 'gen-lang-client-0572045736';
 }
+
+// Load Firebase Project ID for ID Token verification
+const FIREBASE_PROJECT_ID = resolveFirebaseProjectId();
 
 // Cache Google public X.509 certificates for Firebase Auth ID tokens
 let cachedCerts: Record<string, string> = {};
@@ -313,7 +337,7 @@ function formatAiError(error: unknown): string {
   const lower = `${raw} ${unwrapped}`.toLowerCase();
 
   if (lower.includes('gemini_api_key') || lower.includes('api_key_invalid') || lower.includes('api key')) {
-    return 'Clé API Gemini manquante ou invalide sur le serveur (Settings > Secrets).';
+    return 'Clé API Gemini manquante ou invalide sur le serveur (ajoutez GEMINI_API_KEY dans Vercel > Settings > Environment Variables ou dans Secrets).';
   }
   if (
     status === 503 ||
@@ -358,6 +382,7 @@ app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
     aiConfigured: Boolean(process.env.GEMINI_API_KEY),
+    firebaseConfigured: Boolean(FIREBASE_PROJECT_ID),
     models: {
       deep: 'gemini-4-hydrogen',
       fast: 'gemini-3.1-flash-lite',
@@ -460,6 +485,7 @@ app.post('/api/ai/chat-stream', requireFirebaseAuth, aiRateLimit, async (req: Au
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders?.();
 
   let clientClosed = false;

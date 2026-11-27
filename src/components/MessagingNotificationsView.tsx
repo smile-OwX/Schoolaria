@@ -103,10 +103,10 @@ function buildCenseurContacts(school: SchoolProfile, memberships: Membership[]):
 }
 
 function buildDirectorContact(school: SchoolProfile): ScopedContact | null {
-  const dirEmail = normalizeEmail(school.ownerEmail || '');
+  const dirEmail = normalizeEmail(school.ownerEmail || school.email || '');
   if (!dirEmail) return null;
   return {
-    label: `Directeur · ${school.adminName}`,
+    label: `Directeur · ${school.adminName || 'Direction'}`,
     email: dirEmail,
     name: school.adminName || 'Directeur',
     role: 'admin',
@@ -611,6 +611,7 @@ interface NotificationsViewProps {
   ownerUid: string;
   actorEmail: string;
   actorName: string;
+  actualRole?: UserRole;
   effectiveRole: UserRole;
   school: SchoolProfile;
   classrooms: Classroom[];
@@ -623,6 +624,7 @@ export function NotificationsCenterView({
   ownerUid,
   actorEmail,
   actorName,
+  actualRole,
   effectiveRole,
   school,
   classrooms,
@@ -630,6 +632,7 @@ export function NotificationsCenterView({
   memberships,
   notifications,
 }: NotificationsViewProps) {
+  const creatorRoleToWrite: UserRole = actualRole ?? effectiveRole;
   const allowedModes = useMemo(
     () => getAllowedNotificationModes(effectiveRole),
     [effectiveRole]
@@ -822,7 +825,7 @@ export function NotificationsCenterView({
         audienceEmails: uniqueAudience,
         createdByEmail: actorEmail,
         createdByName: actorName,
-        createdByRole: effectiveRole,
+        createdByRole: creatorRoleToWrite,
         expiresAt: computedExpiresAt,
       });
 

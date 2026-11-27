@@ -362,18 +362,18 @@ export function AuditLogsView({ school, auditLogs }: AuditLogsViewProps) {
   return (
     <div className="space-y-6">
       {/* Header Banner */}
-      <div className="rounded-2xl bg-gradient-to-r from-violet-950 via-violet-800 to-indigo-900 text-white p-6 shadow-md border border-violet-700/70 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="rounded-2xl theme-surface-header p-6 shadow-md border flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="flex items-start gap-3.5">
-          <div className="w-11 h-11 rounded-xl bg-white text-violet-900 flex items-center justify-center shrink-0">
+          <div className="w-11 h-11 rounded-xl theme-nav-active flex items-center justify-center shrink-0">
             <ShieldCheck className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-xl font-extrabold text-white">
+            <h1 className="text-xl font-extrabold">
               Journaux Hebdomadaires & Sécurité de l’École
             </h1>
-            <p className="text-xs text-violet-100/90 mt-1">
+            <p className="text-xs theme-header-subtext mt-1">
               Traçabilité infalsifiable (lecture seule pour les journaux passés) · Semaine active :{' '}
-              <strong className="text-white">{currentWeek}</strong> ({getWeekDateRangeLabel(currentWeek)})
+              <strong>{currentWeek}</strong> ({getWeekDateRangeLabel(currentWeek)})
             </p>
           </div>
         </div>
@@ -382,15 +382,15 @@ export function AuditLogsView({ school, auditLogs }: AuditLogsViewProps) {
           <button
             type="button"
             onClick={handleDownloadTxt}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-violet-100 text-violet-950 text-xs font-bold transition-colors shadow-xs"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl theme-nav-active text-xs font-bold transition-colors shadow-xs"
           >
-            <FileDown className="w-4 h-4 text-violet-700" />
+            <FileDown className="w-4 h-4" />
             Télécharger (.txt)
           </button>
           <button
             type="button"
             onClick={handleDownloadCsv}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 border border-white/25 text-white text-xs font-semibold transition-colors"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl theme-header-chip border text-xs font-semibold transition-colors"
           >
             <FileSpreadsheet className="w-4 h-4" />
             Excel (.csv)
@@ -398,7 +398,7 @@ export function AuditLogsView({ school, auditLogs }: AuditLogsViewProps) {
           <button
             type="button"
             onClick={handleDownloadJson}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 border border-white/25 text-white text-xs font-semibold transition-colors"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl theme-header-chip border text-xs font-semibold transition-colors"
           >
             <FileJson className="w-4 h-4" />
             Archive (.json)
@@ -447,10 +447,10 @@ export function AuditLogsView({ school, auditLogs }: AuditLogsViewProps) {
       )}
 
       {/* Security Hardening Checklist */}
-      <div className="bg-violet-50/90 backdrop-blur-xs border border-violet-300/80 rounded-2xl p-5 space-y-3 shadow-xs">
+      <div className="theme-card-tinted backdrop-blur-xs border theme-border-soft rounded-2xl p-5 space-y-3 shadow-xs">
         <div className="flex items-center justify-between flex-wrap gap-2">
-          <h2 className="text-sm font-bold text-violet-950 flex items-center gap-2">
-            <Lock className="w-4 h-4 text-violet-700" />
+          <h2 className="text-sm font-bold theme-text-ink flex items-center gap-2">
+            <Lock className="w-4 h-4 theme-text-accent" />
             Verrous de protection anti-fraude actifs
           </h2>
           <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-lg bg-emerald-100 text-emerald-800">
@@ -459,25 +459,25 @@ export function AuditLogsView({ school, auditLogs }: AuditLogsViewProps) {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-          <div className="bg-white border border-violet-200 rounded-xl p-3.5">
+          <div className="bg-white border theme-border-soft rounded-xl p-3.5">
             <p className="font-bold text-zinc-900">1. Isolation Élèves & Parents</p>
             <p className="text-zinc-600 mt-1">
               Les parents/élèves ne peuvent ni modifier les notes, ni envoyer de fausses notifications, ni voir d’autres dossiers.
             </p>
           </div>
-          <div className="bg-white border border-violet-200 rounded-xl p-3.5">
+          <div className="bg-white border theme-border-soft rounded-xl p-3.5">
             <p className="font-bold text-zinc-900">2. Messagerie Anti-Usurpation</p>
             <p className="text-zinc-600 mt-1">
               L’identité, l’email vérifié et le rôle d’envoi (Admin / Prof / Parent) sont vérifiés par les règles serveur.
             </p>
           </div>
-          <div className="bg-white border border-violet-200 rounded-xl p-3.5">
+          <div className="bg-white border theme-border-soft rounded-xl p-3.5">
             <p className="font-bold text-zinc-900">3. API IA Authentifiée</p>
             <p className="text-zinc-600 mt-1">
               Les routes IA exigent un jeton Google valide avec limitation de requêtes par minute et contrôle des fichiers.
             </p>
           </div>
-          <div className="bg-white border border-violet-200 rounded-xl p-3.5">
+          <div className="bg-white border theme-border-soft rounded-xl p-3.5">
             <p className="font-bold text-zinc-900">4. Journaux Inaltérables</p>
             <p className="text-zinc-600 mt-1">
               Chaque note, absence ou changement d’accès est horodaté par le serveur et ne peut être ni édité ni effacé.
@@ -490,11 +490,11 @@ export function AuditLogsView({ school, auditLogs }: AuditLogsViewProps) {
       <div className="bg-white/95 backdrop-blur-xs border border-zinc-200/90 rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-violet-700" />
+            <Calendar className="w-4 h-4 theme-text-accent" />
             <select
               value={selectedWeek}
               onChange={(e) => setSelectedWeek(e.target.value)}
-              className="px-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs font-bold text-zinc-900 outline-none focus:border-violet-600"
+              className="px-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs font-bold text-zinc-900 outline-none theme-input"
             >
               <option value="ALL">Toutes les semaines ({auditLogs.length})</option>
               {availableWeeks.map((wk) => (
@@ -508,7 +508,7 @@ export function AuditLogsView({ school, auditLogs }: AuditLogsViewProps) {
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value as 'all' | AuditLogCategory)}
-            className="px-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs font-semibold text-zinc-800 outline-none focus:border-violet-600"
+            className="px-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs font-semibold text-zinc-800 outline-none theme-input"
           >
             <option value="all">Toutes catégories</option>
             {(Object.keys(CATEGORY_LABELS) as AuditLogCategory[]).map((cat) => (
@@ -521,7 +521,7 @@ export function AuditLogsView({ school, auditLogs }: AuditLogsViewProps) {
           <select
             value={severityFilter}
             onChange={(e) => setSeverityFilter(e.target.value as 'all' | AuditLogSeverity)}
-            className="px-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs font-semibold text-zinc-800 outline-none focus:border-violet-600"
+            className="px-3 py-2 rounded-xl border border-zinc-200 bg-white text-xs font-semibold text-zinc-800 outline-none theme-input"
           >
             <option value="all">Tous niveaux</option>
             <option value="info">Info</option>
@@ -537,25 +537,25 @@ export function AuditLogsView({ school, auditLogs }: AuditLogsViewProps) {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Rechercher action, acteur, élève..."
-            className="w-full pl-8 pr-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
+            className="w-full pl-8 pr-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none theme-input"
           />
         </div>
       </div>
 
       {/* Logs Table */}
-      <div className="bg-white/95 backdrop-blur-xs border border-violet-300/80 rounded-2xl overflow-hidden shadow-xs">
-        <div className="p-4 sm:p-5 border-b border-violet-200 bg-violet-100/75 flex items-center justify-between">
+      <div className="bg-white/95 backdrop-blur-xs border theme-border-soft rounded-2xl overflow-hidden shadow-xs">
+        <div className="p-4 sm:p-5 border-b theme-table-head flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-bold text-violet-950">
+            <h2 className="text-sm font-bold theme-text-ink">
               Registre d’activité ({filteredLogs.length} entrée{filteredLogs.length > 1 ? 's' : ''})
             </h2>
-            <p className="text-[11px] text-violet-800">
+            <p className="text-[11px] theme-text-accent">
               {selectedWeek === 'ALL'
                 ? 'Historique complet des semaines enregistrées'
                 : `Période : ${selectedWeek} (${getWeekDateRangeLabel(selectedWeek)})`}
             </p>
           </div>
-          <span className="text-[11px] font-mono-nums text-violet-900 font-semibold">
+          <span className="text-[11px] font-mono-nums theme-text-ink font-semibold">
             Lecture seule · Horodatage serveur
           </span>
         </div>
@@ -573,7 +573,7 @@ export function AuditLogsView({ school, auditLogs }: AuditLogsViewProps) {
               const dateLabel = dt.getTime() > 0 ? dt.toLocaleString('fr-FR') : 'À l’instant';
 
               return (
-                <div key={log.id} className="p-4 hover:bg-violet-50/35 transition-colors flex flex-col sm:flex-row sm:items-start justify-between gap-3 text-xs">
+                <div key={log.id} className="p-4 theme-bg-soft-hover transition-colors flex flex-col sm:flex-row sm:items-start justify-between gap-3 text-xs">
                   <div className="flex items-start gap-3 min-w-0">
                     <span
                       className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border font-bold shrink-0 ${sev.badgeClass}`}
@@ -584,7 +584,7 @@ export function AuditLogsView({ school, auditLogs }: AuditLogsViewProps) {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-zinc-900">{log.action}</span>
-                        <span className="px-2 py-0.5 rounded-md bg-violet-100 text-violet-800 font-semibold text-[11px]">
+                        <span className="px-2 py-0.5 rounded-md theme-pill-soft border font-semibold text-[11px]">
                           {CATEGORY_LABELS[log.category] || log.category}
                         </span>
                         <span className="text-[11px] text-zinc-400 font-mono-nums">{log.weekKey}</span>

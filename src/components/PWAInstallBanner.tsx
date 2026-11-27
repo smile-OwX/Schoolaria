@@ -32,10 +32,10 @@ export function PWAInstallButton({ variant = 'header' }: PWAInstallButtonProps) 
 
   const buttonClass =
     variant === 'sidebar'
-      ? 'w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-white/15 hover:bg-white/25 border border-white/25 text-white text-xs font-semibold transition-all whitespace-nowrap shrink-0'
+      ? 'w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl theme-header-chip border text-xs font-semibold transition-all whitespace-nowrap shrink-0'
       : variant === 'card'
       ? 'inline-flex items-center gap-2 px-4 py-2.5 rounded-xl theme-nav-active border theme-border-soft text-xs font-bold transition-colors whitespace-nowrap shrink-0 shadow-xs'
-      : 'inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/15 hover:bg-white/25 border border-white/25 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0';
+      : 'inline-flex items-center gap-1.5 px-3 py-2 rounded-xl theme-header-chip border text-xs font-semibold transition-colors whitespace-nowrap shrink-0';
 
   return (
     <>
@@ -106,9 +106,9 @@ export function PWAInstallButton({ variant = 'header' }: PWAInstallButtonProps) 
                     </p>
                   </div>
 
-                  <div className="p-4 rounded-xl bg-indigo-50 border border-indigo-200 space-y-1.5">
-                    <p className="font-bold text-indigo-950 flex items-center gap-2">
-                      <Smartphone className="w-4 h-4 text-indigo-700" />
+                  <div className="p-4 rounded-xl theme-pill-soft border space-y-1.5">
+                    <p className="font-bold theme-text-ink flex items-center gap-2">
+                      <Smartphone className="w-4 h-4 theme-text-accent" />
                       Installer sur Smartphone (Android & iPhone)
                     </p>
                     <p className="text-zinc-700 leading-relaxed">

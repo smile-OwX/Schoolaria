@@ -65,9 +65,27 @@ export function buildApiUrlFromBase(path: string, base?: string | null): string 
   return cleanPath;
 }
 
-export function isAllowedCorsOrigin(origin?: string, env: CorsEnvLike = {}): boolean {
+export function isSameHostOrigin(origin?: string, hostHeader?: string): boolean {
+  if (!origin || !hostHeader) return false;
+  try {
+    const parsed = new URL(origin);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return false;
+    }
+    return parsed.host.toLowerCase() === hostHeader.trim().toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+export function isAllowedCorsOrigin(
+  origin?: string,
+  env: CorsEnvLike = {},
+  hostHeader?: string
+): boolean {
   if (!origin) return true;
   if (origin === 'null') return false;
+  if (isSameHostOrigin(origin, hostHeader)) return true;
 
   let parsed: URL;
   try {

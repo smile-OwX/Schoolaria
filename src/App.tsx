@@ -397,7 +397,7 @@ function AppShell() {
       actualRole === 'admin' &&
       school &&
       (school.staffEmails === undefined ||
-        school.ownerEmail === undefined ||
+        !school.ownerEmail ||
         school.censeurEmails === undefined ||
         school.teacherEmails === undefined) &&
       !didSyncStaff.current
@@ -1499,6 +1499,7 @@ function AppShell() {
                   actorName={actorName}
                   actorRole={effectiveRole}
                   readOnly={!canEditBulletinsForRole(effectiveRole)}
+                  canUseAi={canAccessTab(effectiveRole, 'assistant')}
                   allowBatchPrint={canBatchPrintBulletinsForRole(effectiveRole)}
                   school={school}
                   classrooms={uiClassrooms}
@@ -1541,6 +1542,7 @@ function AppShell() {
                   ownerUid={ownerUid}
                   actorEmail={actorEmail}
                   actorName={actorName}
+                  actualRole={actualRole}
                   effectiveRole={effectiveRole}
                   school={school}
                   classrooms={uiClassrooms}

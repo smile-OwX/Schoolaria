@@ -56,14 +56,11 @@ interface MakeListViewProps {
 }
 
 const ACCENT_OPTIONS = [
-  { label: 'Violet Académique', value: '#6d28d9' },
-  { label: 'Violet Royal', value: '#7c3aed' },
-  { label: 'Indigo Sciences', value: '#4338ca' },
+  { label: 'Thème de l’école (Automatique)', value: '#6d28d9' },
   { label: 'Bleu Azur', value: '#0284c7' },
   { label: 'Émeraude SVT', value: '#047857' },
   { label: 'Teal Observation', value: '#0f766e' },
   { label: 'Ambre Lettres', value: '#b45309' },
-  { label: 'Pourpre Culture', value: '#a21caf' },
   { label: 'Carmin Philo', value: '#be123c' },
 ];
 
@@ -405,22 +402,16 @@ export function MakeListView({
     cycle: CycleType;
     heading: string;
     desc: string;
-    headerGradient: string;
-    panelBg: string;
   }> = [
     {
       cycle: 'Collège',
       heading: 'Collège · 1er Cycle (6ème → 3ème)',
       desc: '6e/5e (Coef 1) · 4e/3e (Coefficients officiels Togo)',
-      headerGradient: 'from-violet-700 via-purple-700 to-indigo-800',
-      panelBg: 'bg-violet-50/90 border-violet-300/80',
     },
     {
       cycle: 'Lycée',
       heading: 'Lycée · 2nd Cycle (Séries A, C, D)',
       desc: '2nde, 1ère & Terminale · Séries A4, C & D',
-      headerGradient: 'from-indigo-700 via-violet-800 to-purple-900',
-      panelBg: 'bg-violet-50/90 border-violet-300/80',
     },
   ];
 
@@ -439,19 +430,19 @@ export function MakeListView({
         </div>
       )}
       {/* Top Bar */}
-      <div className="rounded-2xl bg-gradient-to-r from-violet-950 via-violet-800 to-indigo-900 text-white p-5 sm:p-6 shadow-md border border-violet-700/70 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="rounded-2xl theme-surface-header p-5 sm:p-6 shadow-md border flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={onBack}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 border border-white/25 text-sm font-semibold text-white transition-colors whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl theme-header-chip border text-sm font-semibold transition-colors whitespace-nowrap shrink-0"
           >
             <ArrowLeft className="w-4 h-4" />
             Retour
           </button>
           <div>
-            <h1 className="text-xl font-extrabold text-white">Listes des classes & divisions (Make List)</h1>
-            <p className="text-xs text-violet-100/90">
+            <h1 className="text-xl font-extrabold">Listes des classes & divisions (Make List)</h1>
+            <p className="text-xs theme-header-subtext">
               Chaque classe du Collège (6ème → 3ème) et du Lycée (2nde, 1ère, Tle · A, C, D) applique automatiquement ses coefficients officiels.
             </p>
           </div>
@@ -459,27 +450,27 @@ export function MakeListView({
 
         <div className="flex flex-wrap items-center gap-3">
           <div className="relative w-full sm:w-64">
-            <Search className="w-4 h-4 text-violet-300 absolute left-3 top-2.5" />
+            <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-2.5" />
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Recherche rapide d'un élève..."
-              className="w-full pl-9 pr-3 py-2 rounded-xl border border-white/25 bg-white/95 text-zinc-900 text-xs focus:border-white outline-none"
+              className="w-full pl-9 pr-3 py-2 rounded-xl border border-zinc-200 bg-white/95 text-zinc-900 text-xs theme-input outline-none"
             />
             {matchedStudents.length > 0 && (
-              <div className="absolute right-0 left-0 mt-1 bg-white border border-violet-200 rounded-xl shadow-lg z-20 divide-y divide-violet-100 overflow-hidden">
+              <div className="absolute right-0 left-0 mt-1 bg-white border theme-border-soft rounded-xl shadow-lg z-20 divide-y divide-zinc-100 overflow-hidden">
                 {matchedStudents.map((s) => (
                   <button
                     key={s.id}
                     type="button"
                     onClick={() => onSelectClass(s.classe)}
-                    className="w-full px-3 py-2 text-left hover:bg-violet-50 flex items-center justify-between text-xs"
+                    className="w-full px-3 py-2 text-left theme-bg-soft-hover flex items-center justify-between text-xs"
                   >
                     <span className="font-semibold text-zinc-800">
                       {s.nom} {s.prenoms}
                     </span>
-                    <span className="text-violet-700 font-semibold">{s.classe}</span>
+                    <span className="theme-text-accent font-semibold">{s.classe}</span>
                   </button>
                 ))}
               </div>
@@ -490,9 +481,9 @@ export function MakeListView({
             <button
               type="button"
               onClick={openAddModal}
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white hover:bg-violet-100 text-violet-950 text-xs font-bold transition-colors whitespace-nowrap shrink-0 shadow-xs"
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl theme-nav-active text-xs font-bold transition-colors whitespace-nowrap shrink-0 shadow-xs"
             >
-              <Plus className="w-4 h-4 text-violet-700" />
+              <Plus className="w-4 h-4" />
               Ajouter une classe
             </button>
           )}
@@ -511,21 +502,21 @@ export function MakeListView({
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: colIdx * 0.06, duration: 0.3 }}
-              className={`backdrop-blur-xs border rounded-2xl overflow-hidden flex flex-col shadow-sm ${col.panelBg}`}
+              className="backdrop-blur-xs border theme-card-tinted theme-border-soft rounded-2xl overflow-hidden flex flex-col shadow-sm"
             >
-              <div className={`bg-gradient-to-r ${col.headerGradient} text-white px-5 py-4 flex items-start justify-between gap-3`}>
+              <div className="theme-surface-header border-b px-5 py-4 flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-sm font-extrabold text-white">{col.heading}</h2>
-                  <p className="text-[11px] text-white/85">{col.desc}</p>
+                  <h2 className="text-sm font-extrabold">{col.heading}</h2>
+                  <p className="text-[11px] theme-header-subtext">{col.desc}</p>
                 </div>
-                <span className="px-2.5 py-1 rounded-lg bg-white/20 text-xs text-white font-bold font-mono-nums whitespace-nowrap shrink-0">
+                <span className="px-2.5 py-1 rounded-lg theme-header-chip border text-xs font-bold font-mono-nums whitespace-nowrap shrink-0">
                   {cycleTotal} élèves
                 </span>
               </div>
 
               <div className="p-4 space-y-3 flex-1">
                 {items.length === 0 ? (
-                  <div className="py-8 px-4 text-center rounded-xl border border-dashed border-violet-300/70 bg-white/60 text-xs text-zinc-600 space-y-2">
+                  <div className="py-8 px-4 text-center rounded-xl border border-dashed theme-border-soft bg-white/60 text-xs text-zinc-600 space-y-2">
                     <p className="font-semibold">Aucune classe configurée pour le cycle {col.cycle}.</p>
                     {canManageClasses && (
                       <button
@@ -536,7 +527,7 @@ export function MakeListView({
                           setClsLevel(LEVEL_SUGGESTIONS[col.cycle][0]);
                           setClsName(col.cycle === 'Lycée' ? '2nde A' : '6e A');
                         }}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-700 hover:bg-violet-800 text-white text-xs font-bold"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg theme-btn-primary text-xs font-bold"
                       >
                         <Plus className="w-3.5 h-3.5" />
                         Ajouter une classe ({col.cycle})
@@ -577,7 +568,7 @@ export function MakeListView({
                             >
                               {renderMotifIcon(theme.motif)}
                             </span>
-                            <span className="text-sm font-extrabold text-zinc-900 group-hover:text-violet-900">
+                            <span className="text-sm font-extrabold text-zinc-900 group-hover:text-[var(--theme-accent-text)]">
                               {cl.name}
                             </span>
                             <span
@@ -596,8 +587,8 @@ export function MakeListView({
 
                           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                             {cl.headTeacher ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/90 border border-violet-200 text-[11px] font-bold text-violet-900">
-                                <UserCheck className="w-3 h-3 text-violet-700 shrink-0" />
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/90 border theme-border-soft text-[11px] font-bold theme-text-ink">
+                                <UserCheck className="w-3 h-3 theme-text-accent shrink-0" />
                                 Titulaire : {cl.headTeacher}
                               </span>
                             ) : (
@@ -639,7 +630,7 @@ export function MakeListView({
                                 onClick={(e) => openEditModal(e, cl)}
                                 title={`Personnaliser ${cl.name}`}
                                 aria-label={`Personnaliser la classe ${cl.name}`}
-                                className="p-1.5 rounded-lg text-zinc-500 hover:text-violet-800 hover:bg-white/80 transition-colors"
+                                className="p-1.5 rounded-lg text-zinc-500 theme-text-accent-hover hover:bg-white/80 transition-colors"
                               >
                                 <SlidersHorizontal className="w-3.5 h-3.5" />
                               </button>
@@ -657,7 +648,7 @@ export function MakeListView({
                               )}
                             </>
                           )}
-                          <ChevronRight className="w-4 h-4 text-zinc-400 group-hover:text-violet-700 transition-colors" />
+                          <ChevronRight className="w-4 h-4 text-zinc-400 group-hover:text-[var(--theme-accent-text)] transition-colors" />
                         </div>
                       </div>
                     </div>
@@ -724,10 +715,10 @@ export function MakeListView({
                             onClick={() => applyClassPreset(preset)}
                             className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors ${
                               isSelected
-                                ? 'bg-violet-700 border-violet-700 text-white'
+                                ? 'theme-btn-primary border-transparent'
                                 : alreadyExists
                                 ? 'bg-zinc-50 border-zinc-200 text-zinc-400 hover:text-zinc-700'
-                                : 'bg-violet-50/70 border-violet-200 text-violet-800 hover:bg-violet-100'
+                                : 'theme-pill-soft border'
                             }`}
                           >
                             {preset.name}
@@ -748,7 +739,7 @@ export function MakeListView({
                         setClsCycle(cyc);
                         setClsLevel(LEVEL_SUGGESTIONS[cyc][0]);
                       }}
-                      className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-medium outline-none focus:border-violet-600 bg-white"
+                      className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-medium outline-none theme-input bg-white"
                     >
                       <option value="Collège">Collège</option>
                       <option value="Lycée">Lycée</option>
@@ -760,7 +751,7 @@ export function MakeListView({
                     <select
                       value={clsLevel}
                       onChange={(e) => setClsLevel(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-medium outline-none focus:border-violet-600 bg-white"
+                      className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-medium outline-none theme-input bg-white"
                     >
                       {LEVEL_SUGGESTIONS[clsCycle].map((lvl) => (
                         <option key={lvl} value={lvl}>
@@ -782,7 +773,7 @@ export function MakeListView({
                       value={clsName}
                       onChange={(e) => setClsName(e.target.value)}
                       placeholder="Ex : 6e A, 5e, 2nde A, 1re D, Tle C"
-                      className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
+                      className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none theme-input"
                     />
                   </div>
 
@@ -793,19 +784,19 @@ export function MakeListView({
                       value={clsSeries}
                       onChange={(e) => setClsSeries(e.target.value)}
                       placeholder="Ex : Série C · Maths & Physique"
-                      className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
+                      className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none theme-input"
                     />
                   </div>
                 </div>
 
                 {/* Fixed Standard Subjects & Coefficients Preview (Non-Editable) */}
-                <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3.5 space-y-2">
+                <div className="rounded-xl border theme-border-soft theme-bg-soft p-3.5 space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-violet-950">
-                      <Lock className="w-3.5 h-3.5 text-violet-700 shrink-0" />
+                    <span className="inline-flex items-center gap-1.5 text-xs font-bold theme-text-ink">
+                      <Lock className="w-3.5 h-3.5 theme-text-accent shrink-0" />
                       Matières & coefficients standards (fixes)
                     </span>
-                    <span className="text-[11px] font-semibold text-violet-700">
+                    <span className="text-[11px] font-semibold theme-text-accent">
                       {fixedSubjectsPreview.length} matières
                     </span>
                   </div>
@@ -813,14 +804,14 @@ export function MakeListView({
                     {fixedSubjectsPreview.map((item) => (
                       <span
                         key={item.name}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white border border-violet-200/80 text-[11px] font-semibold text-zinc-800"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white border theme-border-soft text-[11px] font-semibold text-zinc-800"
                       >
                         <span>{item.name}</span>
-                        <span className="text-violet-700 font-mono-nums font-bold">×{item.coef}</span>
+                        <span className="theme-text-accent font-mono-nums font-bold">×{item.coef}</span>
                       </span>
                     ))}
                   </div>
-                  <p className="text-[11px] text-violet-800/85">
+                  <p className="text-[11px] theme-text-ink opacity-80">
                     Les coefficients sont appliqués automatiquement selon le niveau et la série (non modifiables).
                   </p>
                 </div>
@@ -833,7 +824,7 @@ export function MakeListView({
                       value={clsRoom}
                       onChange={(e) => setClsRoom(e.target.value)}
                       placeholder="Ex : Bâtiment B · S12"
-                      className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
+                      className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none theme-input"
                     />
                   </div>
 
@@ -867,7 +858,7 @@ export function MakeListView({
                           }
                         }
                       }}
-                      className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600 bg-white"
+                      className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none theme-input bg-white"
                     >
                       <option value="__none__">— Aucun titulaire assigné —</option>
                       {teacherMemberships.map((t) => (
@@ -883,7 +874,7 @@ export function MakeListView({
                         value={clsHeadTeacher}
                         onChange={(e) => setClsHeadTeacher(e.target.value)}
                         placeholder="Nom du titulaire (Ex : M. Houngbédji)"
-                        className="mt-2 w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
+                        className="mt-2 w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none theme-input"
                       />
                     )}
                   </div>
@@ -898,7 +889,7 @@ export function MakeListView({
                       <select
                         value={clsMotif}
                         onChange={(e) => setClsMotif(e.target.value as ClassroomMotif)}
-                        className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
+                        className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none theme-input"
                       >
                         <option value="general">Général (∑, π, √x)</option>
                         <option value="maths-physique">Maths & Physique (∫, E=mc², Δ, Ω)</option>
@@ -911,7 +902,7 @@ export function MakeListView({
                       <select
                         value={clsAccent}
                         onChange={(e) => setClsAccent(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none focus:border-violet-600"
+                        className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs outline-none theme-input"
                       >
                         {ACCENT_OPTIONS.map((opt) => (
                           <option key={opt.value} value={opt.value}>
@@ -934,7 +925,7 @@ export function MakeListView({
                   <button
                     type="submit"
                     disabled={saving}
-                    className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-violet-700 hover:bg-violet-800 text-white text-xs font-bold disabled:opacity-60"
+                    className="w-full sm:w-auto px-5 py-2.5 rounded-xl theme-btn-primary text-xs font-bold disabled:opacity-60"
                   >
                     {saving ? 'Enregistrement...' : editingClass ? 'Mettre à jour' : 'Créer la classe'}
                   </button>
@@ -975,19 +966,19 @@ export function MakeListView({
                 </button>
               </div>
 
-              <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3.5 space-y-2">
-                <p className="inline-flex items-center gap-1.5 text-xs font-bold text-violet-950">
-                  <Lock className="w-3.5 h-3.5 text-violet-700" />
+              <div className="rounded-xl border theme-border-soft theme-bg-soft p-3.5 space-y-2">
+                <p className="inline-flex items-center gap-1.5 text-xs font-bold theme-text-ink">
+                  <Lock className="w-3.5 h-3.5 theme-text-accent" />
                   Matières & coefficients standards (fixes)
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {inspectingSubjectsPreview.map((item) => (
                     <span
                       key={item.name}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white border border-violet-200/80 text-[11px] font-semibold text-zinc-800"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white border theme-border-soft text-[11px] font-semibold text-zinc-800"
                     >
                       <span>{item.name}</span>
-                      <span className="text-violet-700 font-mono-nums font-bold">×{item.coef}</span>
+                      <span className="theme-text-accent font-mono-nums font-bold">×{item.coef}</span>
                     </span>
                   ))}
                 </div>
@@ -1046,7 +1037,7 @@ export function MakeListView({
                 name="class-delete-mode"
                 checked={deleteMode === 'transfer'}
                 onChange={() => setDeleteMode('transfer')}
-                className="mt-0.5 text-violet-700"
+                className="mt-0.5 accent-[var(--theme-accent)]"
               />
               <span className="font-semibold text-zinc-800">
                 Transférer les élèves vers une autre classe
@@ -1056,7 +1047,7 @@ export function MakeListView({
               <select
                 value={transferTarget}
                 onChange={(e) => setTransferTarget(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-violet-200 bg-white text-xs font-bold text-violet-900 outline-none focus:border-violet-600"
+                className="w-full px-3 py-2 rounded-lg border theme-border-soft bg-white text-xs font-bold theme-text-ink outline-none theme-input"
               >
                 {effectiveClassrooms
                   .filter((c) => c.name !== pendingDeleteClass.name)
